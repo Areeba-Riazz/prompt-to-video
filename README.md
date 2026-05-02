@@ -1,10 +1,10 @@
-# 🎥 PROJECT MONTAGE: Agentic AI Film Pipeline
+# PROJECT MONTAGE: Agentic AI Film Pipeline
 
 **Project Montage** is an end-to-end, multi-agent AI pipeline that transforms abstract story prompts into fully rendered, character-consistent audiovisual content. The system is split into two primary phases: the **Writer's Room** (Phase 1) and the **Studio Floor** (Phase 2).
 
 ---
 
-## 🏗️ System Architecture
+## System Architecture
 
 ### Phase 1: The Writer's Room (Assignment 3)
 Transforms a high-level prompt or raw script into a structured screenplay and character database.
@@ -32,7 +32,7 @@ graph TD
 
 ---
 
-## 🎭 Multi-Method Execution
+## Multi-Method Execution
 
 To ensure the highest visual fidelity, the pipeline runs multiple generation methods in parallel for every scene. This allows you to compare different AI "directors" side-by-side:
 
@@ -45,62 +45,94 @@ Final artifacts are saved with methodology tags:
 
 ---
 
-## 🚀 Key Technologies & Models
+## Multimodal Architecture & Engines
 
-| Component | Technology / Model | Description |
-| :--- | :--- | :--- |
-| **Orchestration** | **LangGraph** | Manages stateful, parallel multi-agent workflows. |
-| **Character Images** | **Flux** (via Pollinations) | High-fidelity character consistency. |
-| **Voice / Speech** | **edge-tts** | Professional neural TTS with emotion-aware pacing. |
-| **Video Source** | **Pexels API** | Accurate stock footage search based on visual cues. |
-| **AI Video** | **LTX-Video** | HuggingFace serverless text-to-video generation. |
-| **Face Swap** | **InsightFace** | Frame-by-frame character face mapping. |
-| **Lip Sync** | **SadTalker** | AI talking-head animation via Gradio API. |
-| **Memory** | **ChromaDB** | Persistent storage for resumable task graphs. |
+Project Montage uses a multi-engine approach for every modality to ensure reliability and comparison.
 
----
-
-## 🛠️ Setup & Installation
-
-1. **Environment Configuration**:
-   Create a `.env` file in the root with the following keys:
-   ```env
-   GOOGLE_API_KEY=your_gemini_key
-   HF_TOKEN=your_huggingface_token
-   PEXELS_API_KEY=your_pexels_key
-   USE_VIDEO_MODEL=false     # true for LTX-Video, false for Pexels
-   USE_AI_ANIMATION=true     # true for SadTalker, false for FFmpeg Mux
-   ```
-
-2. **Install Dependencies**:
-   ```powershell
-   pip install langgraph chromadb pydantic python-dotenv
-   pip install pillow requests gradio_client edge-tts opencv-python
-   ```
+| Component | Primary Engine | Secondary / Fallback | Mechanism |
+| :--- | :--- | :--- | :--- |
+| **Scripting** | **Gemini 2.0 Flash** | - | Structured JSON generation via LangGraph. |
+| **Portraits** | **Flux-1.dev** | Stable Diffusion 2.1 | Character-consistent image synthesis (Pollinations). |
+| **Voice** | **CosyVoice 2** | edge-tts / Kokoro | Zero-shot voice cloning from reference audio. |
+| **Video** | **Wan 2.1** | LTX-Video / Pexels | T2V generation or Stock Footage retrieval. |
+| **Face Swap** | **InsightFace** | Pass-through | Frame-by-frame face identity mapping. |
+| **Lip Sync** | **SadTalker** | FFmpeg Audio Mux | AI facial animation or temporal audio alignment. |
 
 ---
 
-## 🎬 Running the Pipeline
+## Resilience & Fallbacks
 
-### Step 1: Generate the Script (Phase 1)
+The pipeline is designed to be "always-functional." If a heavy AI model fails or an API is down, the system automatically falls back to simpler methods:
+
+1.  **Voice Priority**: `CosyVoice2` (Cloning) → `edge-tts` (Neural) → `Kokoro` (Local) → `Tone WAV` (Pure Math).
+2.  **Video Priority**: `Wan2.1` (Premium) → `LTX-Video` (AI Fallback) → `Pexels` (Stock Fallback) → `Black Screen`.
+3.  **Lip Sync Priority**: `SadTalker` (AI Anim) → `FFmpeg Mux` (Sync Only) → `Raw Video`.
+
+---
+
+---
+
+## Setup & Installation
+
+1.  **Environment Configuration**:
+    Create a `.env` file in the root:
+    ```env
+    GOOGLE_API_KEY=your_gemini_key
+    HF_TOKEN=your_huggingface_token
+    PEXELS_API_KEY=your_pexels_key
+    DASHSCOPE_API_KEY=your_dashscope_key  # Optional for Wan2.1
+    USE_VIDEO_MODEL=false                 # true for AI Video, false for Pexels
+    USE_AI_ANIMATION=true                 # true for SadTalker, false for Mux
+    ```
+
+2.  **Install Core Dependencies**:
+    ```powershell
+    pip install -r requirements_phase2.txt
+    ```
+
+3.  **External Model Setup (Optional for high-quality modes)**:
+    ```powershell
+    # Clone Wav2Lip for local lip sync
+    git clone https://github.com/Rudrabha/Wav2Lip.git external_models/Wav2Lip
+    # Download checkpoints as per external_models/README (if present)
+    ```
+
+---
+
+---
+
+## Running the Pipeline
+
+### Phase 1: Writer's Room (Script & Assets)
 ```powershell
 python main.py
 ```
-This produces the `scene_manifest.json` and character portraits in `output/`.
+Generates `scene_manifest.json` and character portraits in `output/`.
 
-### Step 2: Render the Video (Phase 2)
+### Phase 2: Studio Floor (Video Rendering)
 ```powershell
-# Run a specific scene
+# Run the entire project (parallel processing)
+python run_phase2.py
+
+# Run only a specific scene
 python run_phase2.py --scene-id 1
 
-# Run all scenes
-python run_phase2.py
+# Specify custom manifest or output paths
+python run_phase2.py --manifest path/to/manifest.json --out my_render_folder
 ```
-Outputs are saved to `output_phase2/raw_scenes/`.
+
+### Verification & Testing
+Before a full run, verify your environment and model connectivity:
+```powershell
+python test_pipeline.py
+```
+This script checks API keys, imports, and runs a mini-pipeline test for each modality.
 
 ---
 
-## 📁 Project Structure
+---
+
+## Project Structure
 
 - `agents/`: Custom LangGraph nodes for Phase 1 and 2.
 - `models/`: Real model implementations (Voice, Video, Face Swap, Lip Sync).
