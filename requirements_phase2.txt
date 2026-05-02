@@ -1,0 +1,47 @@
+# requirements_phase2.txt
+# Project Montage — Phase 2 dependencies
+# Install with: pip install -r requirements_phase2.txt
+
+# ── Core orchestration (shared with Phase 1) ──────────────────────────────────
+langgraph>=0.2.0
+langchain-google-genai>=1.0.0
+chromadb>=0.4.0
+pydantic>=2.0.0
+python-dotenv
+
+# ── Video / Image processing ──────────────────────────────────────────────────
+Pillow>=10.0.0
+imageio>=2.31.0
+imageio-ffmpeg
+opencv-python-headless
+
+# ── Audio processing ──────────────────────────────────────────────────────────
+soundfile
+librosa
+
+# ── AI model inference ────────────────────────────────────────────────────────
+# GPU users (uncomment if NVIDIA GPU available):
+# torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+# diffusers>=0.28.0
+# transformers>=4.40.0
+# accelerate
+
+# CPU-only torch (for fallback Ken Burns video generation is pure Pillow/imageio, no torch needed):
+# torch==2.1.0+cpu -f https://download.pytorch.org/whl/torch_stable.html
+
+# ── TTS (choose one) ─────────────────────────────────────────────────────────
+# Free, no GPU: Kokoro TTS
+kokoro>=0.9.4
+
+# ── Face swap (optional — requires C++ build tools on Windows) ────────────────
+# insightface
+# onnxruntime      # CPU
+# onnxruntime-gpu  # GPU (pick one)
+
+# ── External models (clone separately — see Section 1.2 of guide) ────────────
+# git clone https://github.com/Rudrabha/Wav2Lip.git external_models/Wav2Lip
+# git clone https://github.com/bytedance/LatentSync.git external_models/LatentSync
+# git clone https://github.com/FunAudioLLM/CosyVoice.git external_models/CosyVoice
+
+# ── HTTP requests (for HF API calls) ─────────────────────────────────────────
+requests
