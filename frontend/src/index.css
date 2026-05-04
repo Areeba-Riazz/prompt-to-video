@@ -1,0 +1,12 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", "Roboto", "Outfit", system-ui, sans-serif;
+}
+
+/* Custom base styles for premium design aesthetics */
+@layer base {
+  body {
+    @apply bg-slate-950 text-slate-50 antialiased selection:bg-fuchsia-500 selection:text-white;
+  }
+}

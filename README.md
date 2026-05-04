@@ -1,20 +1,45 @@
 # PROJECT MONTAGE: Agentic AI Film Pipeline
 
-**Project Montage** is an end-to-end, multi-agent AI pipeline that transforms abstract story prompts into fully rendered, character-consistent audiovisual content. The system is split into two primary phases: the **Writer's Room** (Phase 1) and the **Studio Floor** (Phase 2).
+**Project Montage** is an end-to-end, multi-agent AI pipeline that transforms story prompts into audiovisual scenes. **Phase 1** (Writer's Room) produces a structured manifest and character portraits; **Phase 2** (Studio Floor) synthesizes voice, stock/AI video, optional face swap, and lip-sync/mux into final MP4s.
 
 ---
 
-## System Architecture
+## Repository layout
 
-### Phase 1: The Writer's Room (Assignment 3)
-Transforms a high-level prompt or raw script into a structured screenplay and character database.
-- **Agents:** Scriptwriter, Validator, Character Designer, Image Synthesizer.
-- **Output:** `scene_manifest.json`, `character_db.json`, and high-quality Flux character portraits.
+```
+prompt-to-video/
+├── agents/                 # LangGraph nodes
+│   ├── audio_agent/        # TTS, per-scene WAV merge
+│   ├── edit_agent/         # Phase 1 editing / HITL routing
+│   ├── orchestrator/       # graph_phase1, graph_phase2, routing state
+│   ├── story_agent/        # Script + character planning (Phase 1)
+│   └── video_agent/        # Video gen, face swap, lip sync, memory commit
+├── backend/                # FastAPI app + routes (phase1, phase2)
+├── frontend/               # Vite + React UI (Phase 1 / Phase 2 pages)
+├── mcp/                    # MCP tool registry + tools (audio, llm, system, video, vision)
+├── scripts/                # run_phase2.py CLI entry for Phase 2
+├── shared/
+│   ├── schemas/            # TypedDict state (Phase 1 / Phase 2)
+│   └── utils/              # scene_dialogue, media_paths, voice_mapping, output helpers
+├── state_manager/          # Chroma + snapshots for Phase 1 memory
+├── docs/                   # Assignment PDFs
+├── data/outputs/           # Default artifact roots (phase1 / phase2); configurable via .env
+├── main.py                 # Phase 1 CLI entry (montage workflow)
+├── requirements.txt        # Python dependencies
+└── .env                    # API keys & pipeline flags (not committed)
+```
 
-### Phase 2: The Studio Floor (Assignment 4)
-Orchestrates a parallel audiovisual synthesis pipeline using LangGraph and MCP tools.
-- **Agents:** Scene Parser, Voice Synth, Video Generator, Face Swapper, Lip Sync.
-- **Output:** Final lip-synced `.mp4` scenes with character-consistent faces and speech.
+---
+
+## System architecture
+
+### Phase 1: Writer's Room
+
+Structured screenplay, `scene_manifest.json`, `character_db.json`, and character portraits under `PHASE1_OUTPUT_DIR`.
+
+### Phase 2: Studio Floor
+
+Parallel scene branches: voice synthesis → video generation → face swap → lip sync (SadTalker or FFmpeg mux) → optional Chroma commit.
 
 ```mermaid
 graph TD
@@ -32,114 +57,94 @@ graph TD
 
 ---
 
-## Multi-Method Execution
+## Character DB extras (voice & swap)
 
-To ensure the highest visual fidelity, the pipeline runs multiple generation methods in parallel for every scene. This allows you to compare different AI "directors" side-by-side:
+Optional fields per character in `character_db.json` (also persisted when Phase 1 commits characters via `commit_memory`):
 
-1.  **Pexels Stock Engine**: Fetches hyper-realistic 4K stock footage matching the visual atmosphere.
-2.  **LTX-Video AI Engine**: Generates original synthetic video clips from text prompts.
+| Field | Purpose |
+| :--- | :--- |
+| `gender` | `male` / `female` / `neutral` (aliases: m/f, …) — picks Edge/Kokoro voice pool in `shared/utils/voice_mapping.py` |
+| `edge_voice` | Explicit Edge voice id (e.g. `en-US-JennyNeural`) |
+| `tts_voice` | Alias for `edge_voice` |
+| `kokoro_voice` | Explicit Kokoro voice id |
 
-Final artifacts are saved with methodology tags:
-- `scene_01_pexels_final.mp4`
-- `scene_01_hf_ai_final.mp4`
-
----
-
-## Multimodal Architecture & Engines
-
-Project Montage uses a multi-engine approach for every modality to ensure reliability and comparison.
-
-| Component | Primary Engine | Secondary / Fallback | Mechanism |
-| :--- | :--- | :--- | :--- |
-| **Scripting** | **Gemini 2.0 Flash** | - | Structured JSON generation via LangGraph. |
-| **Portraits** | **Flux-1.dev** | Stable Diffusion 2.1 | Character-consistent image synthesis (Pollinations). |
-| **Voice** | **CosyVoice 2** | edge-tts / Kokoro | Zero-shot voice cloning from reference audio. |
-| **Video** | **Wan 2.1** | LTX-Video / Pexels | T2V generation or Stock Footage retrieval. |
-| **Face Swap** | **InsightFace** | Pass-through | Frame-by-frame face identity mapping. |
-| **Lip Sync** | **SadTalker** | FFmpeg Audio Mux | AI facial animation or temporal audio alignment. |
+**Primary speaker** for each scene is derived from **`dialogue`** line counts (`shared/utils/scene_dialogue.py`). That speaker’s portrait is preferred for video prompts, face swap, and SadTalker `source_image` when enabled.
 
 ---
 
-## Resilience & Fallbacks
+## Multi-method video & lip sync
 
-The pipeline is designed to be "always-functional." If a heavy AI model fails or an API is down, the system automatically falls back to simpler methods:
-
-1.  **Voice Priority**: `CosyVoice2` (Cloning) → `edge-tts` (Neural) → `Kokoro` (Local) → `Tone WAV` (Pure Math).
-2.  **Video Priority**: `Wan2.1` (Premium) → `LTX-Video` (AI Fallback) → `Pexels` (Stock Fallback) → `Black Screen`.
-3.  **Lip Sync Priority**: `SadTalker` (AI Anim) → `FFmpeg Mux` (Sync Only) → `Raw Video`.
+- **Video:** `VIDEO_GEN_METHODS` — comma-separated order (`pexels`, `hf_ai`, `dashscope`); first method that yields a clip ≥ `VIDEO_GEN_MIN_BYTES` wins.
+- **Lip sync:** `USE_AI_ANIMATION` — `true` uses SadTalker (portrait + audio); `false` muxes stock video + dialogue WAV.
 
 ---
 
+## Setup
+
+1. Copy `.env.example` to `.env` and set keys (`GOOGLE_API_KEY`, `HF_TOKEN`, `PEXELS_API_KEY`, etc.).
+2. Install dependencies:
+
+```powershell
+pip install -r requirements.txt
+```
+
+### Face swap (InsightFace) — do I need to set this up?
+
+**Only if you want faces in the stock video replaced with your character portraits.** Phase 2 still runs without it: voice, video download, and lip-sync/mux all work. Face swap is optional glue on top.
+
+**What must exist on disk**
+
+The swap tool loads **`inswapper_128.onnx`** (InsightFace’s InSwapper model). By default it looks here:
+
+- Path: **`INSIGHTFACE_MODEL_PATH`** in `.env` (see `.env.example`)
+- Default if unset: **`./models/insightface/inswapper_128.onnx`** (relative to the process **current working directory**, usually the repo root when you run `scripts/run_phase2.py` or uvicorn from the project folder)
+
+Create the folder `models/insightface/` under the repo root, download **`inswapper_128.onnx`** from the official InsightFace model distribution for InSwapper (same file name), and point **`INSIGHTFACE_MODEL_PATH`** at that file if you use a non-default location.
+
+You also need **`insightface`** (and its deps, e.g. **OpenCV**) installed — covered by `requirements.txt` if listed there; if swap fails on import, install/fix those packages.
+
+**What happens if the model is missing or fails to load**
+
+The **`face_swapper`** tool does **not** stop the pipeline. It **copies the input video to the “swapped” output path unchanged**. Your Phase 2 logs may still say face swap ran, but **`scene_*_pexels_raw.mp4` and `scene_*_pexels_swapped.mp4` will look the same** (same pixels). That often reads as “face swap isn’t doing anything” — it isn’t, because there was nothing to run without **`inswapper_128.onnx`**.
+
+**Summary**
+
+| Goal | Action |
+| :--- | :--- |
+| Happy with Pexels faces only | **No** InsightFace setup required |
+| Replace faces with character portraits | **Yes** — put **`inswapper_128.onnx`** on disk and set **`INSIGHTFACE_MODEL_PATH`** if needed |
+
 ---
 
-## Setup & Installation
+## Running
 
-1.  **Environment Configuration**:
-    Create a `.env` file in the root:
-    ```env
-    GOOGLE_API_KEY=your_gemini_key
-    HF_TOKEN=your_huggingface_token
-    PEXELS_API_KEY=your_pexels_key
-    DASHSCOPE_API_KEY=your_dashscope_key  # Optional for Wan2.1
-    USE_VIDEO_MODEL=false                 # true for AI Video, false for Pexels
-    USE_AI_ANIMATION=true                 # true for SadTalker, false for Mux
-    ```
+**Phase 1**
 
-2.  **Install Core Dependencies**:
-    ```powershell
-    pip install -r requirements_phase2.txt
-    ```
-
-3.  **External Model Setup (Optional for high-quality modes)**:
-    ```powershell
-    # Clone Wav2Lip for local lip sync
-    git clone https://github.com/Rudrabha/Wav2Lip.git external_models/Wav2Lip
-    # Download checkpoints as per external_models/README (if present)
-    ```
-
----
-
----
-
-## Running the Pipeline
-
-### Phase 1: Writer's Room (Script & Assets)
 ```powershell
 python main.py
 ```
-Generates `scene_manifest.json` and character portraits in `output/`.
 
-### Phase 2: Studio Floor (Video Rendering)
+**Phase 2** (loads repo-root `.env` regardless of cwd)
+
 ```powershell
-# Run the entire project (parallel processing)
-python run_phase2.py
-
-# Run only a specific scene
-python run_phase2.py --scene-id 1
-
-# Specify custom manifest or output paths
-python run_phase2.py --manifest path/to/manifest.json --out my_render_folder
+python scripts/run_phase2.py
+python scripts/run_phase2.py --scene-id 1
 ```
 
-### Verification & Testing
-Before a full run, verify your environment and model connectivity:
+**API**
+
 ```powershell
-python test_pipeline.py
+python -m uvicorn backend.app:app --reload --host 127.0.0.1 --port 8000
 ```
-This script checks API keys, imports, and runs a mini-pipeline test for each modality.
+
+Smoke checks:
+
+```powershell
+python scripts/test_pipeline.py
+```
+
+Artifacts default to `data/outputs/phase1` and `data/outputs/phase2` (override with `PHASE1_OUTPUT_DIR` / `PHASE2_OUTPUT_DIR`).
 
 ---
 
----
-
-## Project Structure
-
-- `agents/`: Custom LangGraph nodes for Phase 1 and 2.
-- `models/`: Real model implementations (Voice, Video, Face Swap, Lip Sync).
-- `tools/`: MCP Tool Registry and individual tool handlers.
-- `memory/`: Persistent memory management via ChromaDB.
-- `output/`: Phase 1 artifacts (Character portraits, JSON manifest).
-- `output_phase2/`: Final Phase 2 artifacts (Audio tracks, MP4 scenes).
-
----
 *Developed for the Agentic AI (CS-4015) Course Project.*

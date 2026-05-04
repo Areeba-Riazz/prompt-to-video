@@ -40,3 +40,11 @@ models/insightface/*.onnx
 # Temporary Audio/Video Artifacts
 output_phase2/temp_audio/
 output_phase2/memory_db/
+
+# Node.js
+node_modules/
+
+# Vite
+.vite/
+
+data/
