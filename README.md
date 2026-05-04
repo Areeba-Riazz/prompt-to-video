@@ -31,14 +31,37 @@ prompt-to-video/
 
 ---
 
-## System architecture
+## 🚀 Project Novelty
+
+**Project Montage** is not just an API wrapper; it is a **fully autonomous, multi-agent film studio**. Its novelty lies in several key areas:
+
+*   **Agentic Orchestration:** Unlike linear pipelines, we use **LangGraph** to manage complex, stateful workflows with parallel branching (per-scene execution) and circular feedback loops.
+*   **Intelligent Edit & Undo:** The system features a dedicated **Edit Agent** that interprets free-text instructions (e.g., *"Make this scene more mysterious"*) and selectively re-runs specific pipeline nodes while maintaining a versioned state history for full undo/revert support.
+*   **Identity Consistency:** By combining portrait generation with **InsightFace** (Face Swap) and **SadTalker** (Lip Sync), the system ensures that characters remain visually consistent across diverse stock footage and AI-generated clips.
+
+---
+
+## 🛠️ Tech Stack
+
+| Layer | Technologies |
+| :--- | :--- |
+| **Agentic Framework** | [LangGraph](https://github.com/langchain-ai/langgraph), [LangChain](https://github.com/langchain-ai/langchain) |
+| **LLM (Reasoning)** | Google Gemini Pro, Groq (LLaMA 3.1 Fallback) |
+| **Audio & TTS** | Edge-TTS, Kokoro, ElevenLabs (Optional) |
+| **Visual Gen** | Pexels API (Stock), Hugging Face (LTX-Video / Stable Diffusion) |
+| **Computer Vision** | InsightFace (Face Swap), SadTalker (Lip Sync), OpenCV |
+| **Backend** | FastAPI, Uvicorn, Python 3.11+ |
+| **Frontend** | React 19, Vite, Tailwind CSS 4 |
+| **State & Memory** | ChromaDB, SQLite (Checkpointing) |
+
+---
+
+## 🏗️ System Architecture
 
 ### Phase 1: Writer's Room
-
-Structured screenplay, `scene_manifest.json`, `character_db.json`, and character portraits under `PHASE1_OUTPUT_DIR`.
+Produces a structured screenplay, `scene_manifest.json`, `character_db.json`, and character portraits under `PHASE1_OUTPUT_DIR`.
 
 ### Phase 2: Studio Floor
-
 Parallel scene branches: voice synthesis → video generation → face swap → lip sync (SadTalker or FFmpeg mux) → optional Chroma commit.
 
 ```mermaid
@@ -116,34 +139,52 @@ The **`face_swapper`** tool does **not** stop the pipeline. It **copies the inpu
 
 ---
 
-## Running
+## Running the System
 
-**Phase 1**
+### 1. Backend (API & Orchestrator)
 
-```powershell
-python main.py
-```
-
-**Phase 2** (loads repo-root `.env` regardless of cwd)
+The backend is built with FastAPI and handles the LangGraph agents.
 
 ```powershell
-python scripts/run_phase2.py
-python scripts/run_phase2.py --scene-id 1
-```
+# Install dependencies
+pip install -r requirements.txt
 
-**API**
-
-```powershell
+# Start the FastAPI server
+# The API will be available at http://127.0.0.1:8000
 python -m uvicorn backend.app:app --reload --host 127.0.0.1 --port 8000
 ```
 
-Smoke checks:
+**Key CLI Tools:**
+*   **Phase 1 (Writer's Room):** `python main.py`
+*   **Phase 2 (Studio Floor):** `python scripts/run_phase2.py`
+*   **Single Scene Run:** `python scripts/run_phase2.py --scene-id 1`
 
+### 2. Frontend (React UI)
+
+The frontend is a Vite + React application.
+
+```powershell
+# Navigate to the frontend directory
+cd frontend
+
+# Install dependencies
+npm install
+
+# Start the development server
+# The UI will be available at http://localhost:5173
+npm run dev
+```
+
+---
+
+## Testing & Artifacts
+
+Smoke checks for the integrated pipeline:
 ```powershell
 python scripts/test_pipeline.py
 ```
 
-Artifacts default to `data/outputs/phase1` and `data/outputs/phase2` (override with `PHASE1_OUTPUT_DIR` / `PHASE2_OUTPUT_DIR`).
+Artifacts default to `data/outputs/phase1` and `data/outputs/phase2` (override with `PHASE1_OUTPUT_DIR` / `PHASE2_OUTPUT_DIR` in `.env`).
 
 ---
 

@@ -1,73 +1,37 @@
-# React + TypeScript + Vite
+# Project Montage — Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This is the user interface for the **Project Montage** agentic AI video pipeline. It allows users to input story prompts, review scripts via HITL (Human-in-the-Loop), and preview generated movie scenes.
 
-Currently, two official plugins are available:
+## 🚀 Getting Started
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+### Prerequisites
+*   [Node.js](https://nodejs.org/) (v18 or higher recommended)
+*   [npm](https://www.npmjs.com/)
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+### Installation
+```bash
+# From the project root
+cd frontend
+npm install
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+### Development
+```bash
+npm run dev
 ```
+The application will be available at [http://localhost:5173](http://localhost:5173).
+
+## 🛠️ Tech Stack
+*   **Framework:** [React 19](https://react.dev/)
+*   **Build Tool:** [Vite](https://vitejs.dev/)
+*   **Styling:** [Tailwind CSS 4](https://tailwindcss.com/)
+*   **Routing:** [React Router 7](https://reactrouter.com/)
+*   **Language:** [TypeScript](https://www.typescriptlang.org/)
+
+## 📂 Structure
+*   `src/pages/Phase1.tsx`: The "Writer's Room" interface for script generation and character design.
+*   `src/pages/Phase2.tsx`: The "Studio Floor" interface for audio/video synthesis and scene playback.
+*   `src/pages/HITLModal.tsx`: The review interface for script approval.
+
+## 🌐 API Integration
+The frontend communicates with the FastAPI backend at `http://127.0.0.1:8000`. Ensure the backend is running for the pipeline to function.
