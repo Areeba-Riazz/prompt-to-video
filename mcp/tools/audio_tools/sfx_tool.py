@@ -52,14 +52,14 @@ class SFXTool(BaseTool):
         
         # 1. CACHE CHECK
         if os.path.exists(cached_file) and os.path.getsize(cached_file) > 1000:
-            logger.info(f"📁 [SFX] Using cached: {cue}")
+            logger.info(f"[SFX] Using cached: {cue}")
             shutil.copy2(cached_file, output_path)
             return {"ok": True, "output_path": output_path, "method": "cache"}
 
         # 2. METHOD 1: PIXABAY VIDEO AUDIO EXTRACTION
         pixabay_key = os.environ.get("PIXABAY_API_KEY", "").strip()
         if pixabay_key:
-            logger.info(f"🎞️ [SFX] Searching Pixabay Videos for: {cue}")
+            logger.info(f"[SFX] Searching Pixabay Videos for: {cue}")
             try:
                 # Search for videos matching the cue
                 q = urllib.parse.quote(cue)
@@ -75,7 +75,7 @@ class SFXTool(BaseTool):
                     video_url = hits[0]["videos"].get("tiny", {}).get("url") or hits[0]["videos"].get("small", {}).get("url")
                     
                     if video_url:
-                        logger.info(f"📥 [SFX] Extracting audio from Pixabay video...")
+                        logger.info(f"[SFX] Extracting audio from Pixabay video...")
                         if self._download_and_convert(video_url, cached_file):
                             shutil.copy2(cached_file, output_path)
                             return {"ok": True, "output_path": output_path, "method": "pixabay_video_extract"}
@@ -83,7 +83,7 @@ class SFXTool(BaseTool):
                 logger.warning(f"Pixabay extraction failed: {e}")
 
         # 3. METHOD 2: WIKIMEDIA SEARCH (DNS-BYPASS FALLBACK)
-        logger.info(f"🔍 [SFX] Falling back to Wikimedia for: {cue}")
+        logger.info(f"[SFX] Falling back to Wikimedia for: {cue}")
         download_url = self._search_wikimedia(cue)
 
         if download_url:

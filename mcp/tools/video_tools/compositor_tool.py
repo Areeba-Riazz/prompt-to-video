@@ -315,7 +315,7 @@ class CompositorTool(BaseTool):
             return {"ok": False, "error": "Output file missing or empty after composition"}
 
         size_mb = os.path.getsize(output_path) / 1_048_576
-        print(f"[Compositor] ✅ Final output: {output_path} ({size_mb:.1f} MB, {len(clips)} clips)")
+        print(f"[Compositor] [DONE] Final output: {output_path} ({size_mb:.1f} MB, {len(clips)} clips)")
         return {
             "ok": True,
             "output_path": output_path,

@@ -177,14 +177,36 @@ npm run dev
 
 ---
 
-## Testing & Artifacts
+## 🧪 Testing & Validation
 
-Smoke checks for the integrated pipeline:
+The project includes a comprehensive test suite covering core agents, tools, and the end-to-end pipeline.
+
+### 1. Unit Tests (Pytest)
+A suite of 11 unit tests validates the logic of individual components (Script parsing, Audio SFX parsing, Video trimming, etc.).
 ```powershell
-python scripts/test_pipeline.py
+# Set PYTHONPATH to root and run tests
+$env:PYTHONPATH="."
+.\venv\Scripts\pytest tests/unit
 ```
 
-Artifacts default to `data/outputs/phase1` and `data/outputs/phase2` (override with `PHASE1_OUTPUT_DIR` / `PHASE2_OUTPUT_DIR` in `.env`).
+### 2. End-to-End Pipeline Verification
+The master test script runs the full pipeline from a single prompt to a final composited video, validating Phases 1, 2, and 3.
+```powershell
+# Run the full E2E pipeline test
+$env:PYTHONPATH="."
+.\venv\Scripts\python scripts/test_pipeline.py
+```
+
+---
+
+## 📂 Artifacts & Outputs
+
+Artifacts default to `data/outputs/phase1` and `data/outputs/phase2`.
+- **Phase 1**: `scene_manifest.json`, `character_db.json`, `image_assets/`
+- **Phase 2**: `audio_tracks/`, `raw_scenes/`, `final_scenes/`
+- **Final**: `final_output.mp4` (Composited movie)
+
+Override locations with `PHASE1_OUTPUT_DIR` / `PHASE2_OUTPUT_DIR` in `.env`.
 
 ---
 

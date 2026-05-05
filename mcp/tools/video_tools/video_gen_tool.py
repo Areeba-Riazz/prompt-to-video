@@ -83,13 +83,13 @@ def _generate_pexels_query(visual_cue: str, location: str, gender: str) -> str:
         )
         query = chat_text(system=system_prompt, user=user_prompt, temperature=0.3)
         if query and len(query.split()) >= 3:
-            logger.info(f"🤖 [QueryGen] LLM generated: {query}")
+            logger.info(f"[QueryGen] LLM generated: {query}")
             return query
     except Exception as e:
         logger.warning(f"QueryGen LLM failed: {e}")
 
     # 2. Fallback Rule-Based Approach
-    logger.info("🛠️ [QueryGen] Using rule-based fallback...")
+    logger.info("[QueryGen] Using rule-based fallback...")
     subject = f"one {gender or 'person'}"
     
     # Clean location (remove INT./EXT. and - DAY/NIGHT)
@@ -148,7 +148,7 @@ def _generate_pexels_stock(kwargs: Dict[str, Any], output_path: str) -> str:
 
     # TRIMMING LOGIC: If clip is longer than target_duration, cut it
     if target_duration > 0 and actual_dur > target_duration + 0.1:
-        logger.info(f"✂️ [VideoGen] Trimming clip from {actual_dur:.1f}s to {target_duration:.1f}s")
+        logger.info(f"[VideoGen] Trimming clip from {actual_dur:.1f}s to {target_duration:.1f}s")
         tmp_trim = output_path + ".trim.mp4"
         try:
             subprocess.run([

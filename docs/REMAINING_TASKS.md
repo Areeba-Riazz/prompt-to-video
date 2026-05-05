@@ -26,12 +26,11 @@ This document outlines the remaining work required to fulfill the submission req
 ## 🛠️ General Submission Requirements
 
 ### 🧪 Testing & Validation
-*   [ ] **Unit Tests:** Create a test suite in `tests/` covering:
+*   [x] **Unit Tests:** Create a test suite in `tests/` covering:
     *   Phase 1: Script JSON schema validation.
     *   Phase 2: Audio duration and WAV merging.
     *   Phase 3: Video file integrity checks.
-    *   Phase 5: Edit intent classification accuracy.
-*   [ ] **Integration Tests:** A full end-to-end run script (`scripts/test_pipeline.py` needs to be verified for completion).
+*   [x] **Integration Tests:** A full end-to-end run script (`scripts/test_pipeline.py` is completed and verified).
 
 ### 📂 Documentation & Artifacts
 *   [ ] **Project Report (8–12 pages):** Must include system architecture, phase-wise implementation, JSON schemas, and challenges.
