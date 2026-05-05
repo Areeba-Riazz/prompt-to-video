@@ -1,213 +1,445 @@
-# PROJECT MONTAGE: Agentic AI Film Pipeline
+# Project Montage — AI-Powered Animated Video Generation
 
-**Project Montage** is an end-to-end, multi-agent AI pipeline that transforms story prompts into audiovisual scenes. **Phase 1** (Writer's Room) produces a structured manifest and character portraits; **Phase 2** (Studio Floor) synthesizes voice, stock/AI video, optional face swap, and lip-sync/mux into final MP4s.
+**Agentic AI (CS-4015) — Semester Project 2026**  
+*National University of Computer and Emerging Sciences (FAST-NUCES), Islamabad*
+
+Project Montage is a full-stack, **multi-agent** system that turns a single natural-language prompt into a **short animated-style film**: structured story and dialogue, character-specific voices, per-scene video, optional face consistency and lip sync, and a **composited MP4** with transitions, background music, and subtitles. A **Phase 5 edit agent** parses free-text instructions into structured intents and coordinates **targeted re-runs** or **lightweight FFmpeg-style fixes**, with **snapshot-based history** for revert workflows.
+
+This repository is organized for **modular phases**, shared **JSON-oriented contracts**, and **independent testing**, aligned with the course specification (story/script, audio, video composition, web UI, edit agent with undo-oriented state).
 
 ---
 
-## Repository layout
+## Table of contents
+
+1. [Problem and goals](#problem-and-goals)  
+2. [How it works (phases)](#how-it-works-phases)  
+3. [System architecture](#system-architecture)  
+4. [Repository structure](#repository-structure)  
+5. [Artifacts and directories](#artifacts-and-directories)  
+6. [JSON schemas and file formats](#json-schemas-and-file-formats)  
+7. [Backend API](#backend-api)  
+8. [WebSocket progress](#websocket-progress)  
+9. [Technology stack](#technology-stack)  
+10. [Prerequisites](#prerequisites)  
+11. [Setup and how to run](#setup-and-how-to-run)  
+12. [Testing](#testing)  
+13. [Configuration](#configuration)  
+14. [Course alignment](#course-alignment)  
+15. [Further documentation](#further-documentation)
+
+---
+
+## Problem and goals
+
+Producing even a short animated video typically involves writers, voice talent, illustrators, and editors. Generative models now cover language, speech, and video, but tying them together with **orchestration**, **structured interchange formats**, and a **usable UI** is non-trivial.
+
+This project demonstrates:
+
+- **LangGraph** workflows with explicit state types and branching (including human-in-the-loop approval).
+- **Heterogeneous APIs** (LLMs, stock video, generative video, TTS, optional CV models) behind a single pipeline.
+- **Structured outputs** (Pydantic models, JSON manifests, intent objects).
+- A **React** dashboard that drives the API and shows live progress.
+- **Versioned snapshots** of state (and copied assets) to support edit / revert demos.
+
+---
+
+## How it works (phases)
+
+| Phase | Name (course) | Role in this codebase |
+| :--- | :--- | :--- |
+| **1** | Story and script generation | LangGraph **Phase 1** graph: scriptwriter → HITL checkpoint → character design → portrait synthesis → persistence under `data/outputs/phase1/`. |
+| **2** | Audio generation | Per-scene **TTS**, mixing, SFX/BGM tooling via **MCP tools** and `voice_synth_node` in the Studio Floor graph. |
+| **3** | Video composition | Per-scene **stock / AI video**, optional **InsightFace** swap and **SadTalker** (or FFmpeg mux), then **`POST /api/phase2/compose`** merges scenes into `final_output.mp4` with transitions, BGM, subtitles. |
+| **4** | Web interface | **Vite + React 19** app (`frontend/`): Phase 1 HITL, Phase 2 run / compose / playback, edit panel calling Phase 5 APIs, WebSocket progress. |
+| **5** | Edit agent (+ undo support) | **Intent classifier** (`agents/edit_agent/intent_classifier.py`) maps natural language to `{ intent, target, scope, parameters }`. **`/api/phase5/execute`** routes to script/audio/video regeneration or **post-proc-only** paths. **`StateManager`** snapshots under `data/snapshots/`; **`/revert`** restores saved state. |
+
+---
+
+## System architecture
+
+High-level data flow:
+
+```mermaid
+flowchart LR
+  subgraph UI["Phase 4 — Web UI"]
+    FE[React Dashboard]
+  end
+
+  subgraph API["FastAPI"]
+    P1["/api/phase1/*"]
+    P2["/api/phase2/*"]
+    P5["/api/phase5/*"]
+    WS["/ws/progress"]
+  end
+
+  subgraph G1["LangGraph Phase 1"]
+    SW[Scriptwriter]
+    HITL[HITL gate]
+    CHAR[Character + portraits]
+  end
+
+  subgraph G2["LangGraph Studio Floor"]
+    PARSE[Scene parser]
+    VO[Voice synth]
+    VG[Video gen]
+    FS[Face swap]
+    LS[Lip sync]
+    PP[Post-proc]
+  end
+
+  subgraph OUT["Outputs"]
+    M["scene_manifest.json"]
+    C["character_db.json"]
+    SC["scene_*.mp4"]
+    F["final_output.mp4"]
+  end
+
+  FE --> P1 & P2 & P5
+  FE --> WS
+  P1 --> G1
+  G1 --> M & C
+  P2 --> G2
+  G2 --> SC
+  P2 --> F
+  P5 --> P1 & P2
+```
+
+**Orchestration**
+
+- **Phase 1** (`agents/orchestrator/graph_phase1.py`): `MemorySaver` checkpointer; interrupts **before** `Hitl_node` so the API can return `awaiting_hitl` and resume after `POST /api/phase1/hitl/approve`.
+- **Studio Floor** (`agents/orchestrator/graph_phase2.py`): parses manifest → voice synthesis → parallel video branches → face swap → lip sync → post-proc → memory commit. **Final assembly** is intentionally triggered separately via **`POST /api/phase2/compose`** (Phase 3-style composition).
+
+**Tooling layer**
+
+- **`mcp/`**: registry (`tool_registry.py`, `tool_executor.py`) and **tools** for LLM structuring, TTS, FFmpeg, compositing, video generation, face swap, lip sync, image gen, audio FX, etc. Phase graphs and routes **register** tools at startup.
+
+**State and memory**
+
+- **`state_manager/`**: Chroma-backed helpers (`memory_manager.py`) and **`StateManager`** snapshot/revert (`snapshot.py`) used by Phase 5 routes.
+
+---
+
+## Repository structure
 
 ```
 prompt-to-video/
-├── agents/                 # LangGraph nodes
-│   ├── audio_agent/        # TTS, per-scene WAV merge
-│   ├── edit_agent/         # Phase 1 editing / HITL routing
-│   ├── orchestrator/       # graph_phase1, graph_phase2, routing state
-│   ├── story_agent/        # Script + character planning (Phase 1)
-│   └── video_agent/        # Video gen, face swap, lip sync, memory commit
-├── backend/                # FastAPI app + routes (phase1, phase2)
-├── frontend/               # Vite + React UI (Phase 1 / Phase 2 pages)
-├── mcp/                    # MCP tool registry + tools (audio, llm, system, video, vision)
-├── scripts/                # run_phase2.py CLI entry for Phase 2
+├── agents/
+│   ├── audio_agent/          # TTS / scene audio pipeline nodes
+│   ├── edit_agent/           # HITL/validator hooks, intent classifier, planners, executor
+│   ├── orchestrator/         # graph_phase1.py, graph_phase2.py, routing helpers
+│   ├── post_proc_agent/      # Surgical audio/video FX via tools (e.g. FFmpeg)
+│   ├── story_agent/          # Scriptwriter, character design, image synthesis nodes
+│   └── video_agent/          # Video gen, face swap, lip sync, compositor nodes
+├── backend/
+│   ├── app.py                # FastAPI app, CORS, routers, WebSocket
+│   ├── routes/               # phase1.py, phase2.py, phase5.py
+│   └── websocket/            # Progress broadcast manager
+├── frontend/                 # Vite + React + Tailwind v4 dashboard
+├── mcp/                      # Tool registry + concrete tools (audio, video, vision, llm, system)
 ├── shared/
-│   ├── schemas/            # TypedDict state (Phase 1 / Phase 2)
-│   └── utils/              # scene_dialogue, media_paths, voice_mapping, output helpers
-├── state_manager/          # Chroma + snapshots for Phase 1 memory
-├── docs/                   # Assignment PDFs
-├── data/outputs/           # Default artifact roots (phase1 / phase2); configurable via .env
-├── main.py                 # Phase 1 CLI entry (montage workflow)
-├── requirements.txt        # Python dependencies
-└── .env                    # API keys & pipeline flags (not committed)
+│   ├── schemas/              # MontageState, StudioState (TypedDict / Pydantic models)
+│   └── utils/                # LLM client, paths, progress reporting, output helpers, …
+├── state_manager/            # Snapshots, Chroma DB files, storage helpers
+├── scripts/
+│   ├── run_phase2.py         # CLI: Studio Floor from Phase 1 artifacts
+│   └── test_pipeline.py      # Scripted multi-phase smoke test
+├── tests/unit/               # pytest modules per phase/tooling
+├── data/                     # outputs, snapshots (gitignored paths — see .gitignore)
+├── docs/                     # assignment PDFs + internal notes
+├── main.py                   # Phase 1 CLI entry (invokes Phase 1 graph + save_outputs)
+├── requirements.txt          # Python dependencies (see Setup — FastAPI stack installed separately)
+└── .env.example              # Documented environment variables
 ```
 
 ---
 
-## 🚀 Project Novelty
+## Artifacts and directories
 
-**Project Montage** is not just an API wrapper; it is a **fully autonomous, multi-agent film studio**. Its novelty lies in several key areas:
-
-*   **Agentic Orchestration:** Unlike linear pipelines, we use **LangGraph** to manage complex, stateful workflows with parallel branching (per-scene execution) and circular feedback loops.
-*   **Intelligent Edit & Undo:** The system features a dedicated **Edit Agent** that interprets free-text instructions (e.g., *"Make this scene more mysterious"*) and selectively re-runs specific pipeline nodes while maintaining a versioned state history for full undo/revert support.
-*   **Identity Consistency:** By combining portrait generation with **InsightFace** (Face Swap) and **SadTalker** (Lip Sync), the system ensures that characters remain visually consistent across diverse stock footage and AI-generated clips.
-
----
-
-## 🛠️ Tech Stack
-
-| Layer | Technologies |
+| Path | Contents |
 | :--- | :--- |
-| **Agentic Framework** | [LangGraph](https://github.com/langchain-ai/langgraph), [LangChain](https://github.com/langchain-ai/langchain) |
-| **LLM (Reasoning)** | Google Gemini Pro, Groq (LLaMA 3.1 Fallback) |
-| **Audio & TTS** | Edge-TTS, Kokoro, ElevenLabs (Optional) |
-| **Visual Gen** | Pexels API (Stock), Hugging Face (LTX-Video / Stable Diffusion) |
-| **Computer Vision** | InsightFace (Face Swap), SadTalker (Lip Sync), OpenCV |
-| **Backend** | FastAPI, Uvicorn, Python 3.11+ |
-| **Frontend** | React 19, Vite, Tailwind CSS 4 |
-| **State & Memory** | ChromaDB, SQLite (Checkpointing) |
+| `data/outputs/phase1/` | `scene_manifest.json`, `character_db.json`, `image_assets/*.png` |
+| `data/outputs/phase2/` | Intermediate audio/video; `final_scenes/scene_<id>.mp4` |
+| `data/outputs/final_output.mp4` | Composed film after **compose** |
+| `data/outputs/phase3/` | `composition_metadata.json` (when written by compositor) |
+| `data/snapshots/` | Version folders + `history.json` for Phase 5 |
+
+Configurable via `.env`: `PHASE1_OUTPUT_DIR`, `PHASE2_OUTPUT_DIR` (defaults shown in `.env.example`).
 
 ---
 
-## 🏗️ System Architecture
+## JSON schemas and file formats
 
-### Phase 1: Writer's Room
-Produces a structured screenplay, `scene_manifest.json`, `character_db.json`, and character portraits under `PHASE1_OUTPUT_DIR`.
+### Shared types (`shared/schemas/state.py`)
 
-### Phase 2: Studio Floor
-Parallel scene branches: voice synthesis → video generation → face swap → lip sync (SadTalker or FFmpeg mux) → optional Chroma commit.
+**`Scene` (Pydantic)**
 
-```mermaid
-graph TD
-    A[Prompt/Script] --> B[Phase 1: Writer's Room]
-    B --> C[Scene Manifest + Character DB]
-    C --> D[Phase 2: Studio Floor]
-    D --> E{Parallel Branching}
-    E --> F[Voice Synthesis - edge-tts]
-    E --> G[Video Gen - Pexels/LTX-Video]
-    F --> H[Lip Sync Integration]
-    G --> I[Face Swap - InsightFace]
-    I --> H
-    H --> J[Final Movie Scenes .mp4]
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `scene_id` | `int` | Scene index |
+| `location` | `str` | Location / slug line |
+| `characters` | `list[str]` | Characters present |
+| `dialogue` | `list[dict]` | Items with `speaker`, `line`, `visual_cue` (and optionally `emotion` / fields merged by the edit agent) |
+
+**`Character` (Pydantic)**
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `name` | `str` | Character name |
+| `personality` | `str` | Narrative personality |
+| `appearance` | `str` | Visual description |
+| `voice_profile` | `str` | Voice brief |
+| `reference_style` | `str` | Art direction hint |
+| `gender` | `str \| null` | Optional: `"male"` \| `"female"` \| `"neutral"` |
+| `image_path` | `str \| null` | Portrait path when generated |
+
+**`MontageState` (TypedDict)** — Phase 1 graph state: includes `user_prompt`, `input_mode` (`manual` \| `auto`), `hitl_approved`, `raw_script`, `scenes`, `characters`, `status`, `errors`, `current_agent`, and artifact paths (`scene_manifest_path`, `character_db_path`, `image_assets_dir`).
+
+### Studio Floor (`shared/schemas/phase2_state.py`)
+
+**`StudioState` (TypedDict)** — keys include:
+
+- Inputs: `scene_manifest_path`, `output_root`, `character_db`, `scene_id_filter`, `skip_video`, `skip_all_gen`, `post_proc_map`
+- Planning: `scenes`, `task_graph`, `scene_jobs`
+- Reducers: `audio_tracks`, `video_tracks`, `face_swaps`, `final_scenes`, `task_logs`, `errors` (annotated with `operator.add` where applicable)
+- Output: `final_output_path`
+- Control: `status`, `current_agent`
+
+### On-disk Phase 1 JSON
+
+**`scene_manifest.json`**
+
+```json
+{
+  "scenes": [
+    {
+      "scene_id": 1,
+      "location": "INT. CAFE - DAY",
+      "characters": ["Alex"],
+      "dialogue": [
+        {
+          "speaker": "Alex",
+          "line": "Hello there.",
+          "visual_cue": "Alex waves cheerfully."
+        }
+      ]
+    }
+  ]
+}
 ```
 
+**`character_db.json`**
+
+```json
+{
+  "characters": [
+    {
+      "name": "Alex",
+      "personality": "...",
+      "appearance": "...",
+      "voice_profile": "...",
+      "reference_style": "...",
+      "gender": "neutral",
+      "image_path": "data/outputs/phase1/image_assets/alex.png"
+    }
+  ]
+}
+```
+
+### Phase 5 intent object (`agents/edit_agent/intent_classifier.py`)
+
+The classifier prompts the LLM to return **only JSON** with this shape:
+
+```json
+{
+  "intent": "pitch_shift",
+  "target": "audio_fx",
+  "scope": "character:Alex",
+  "parameters": {
+    "pitch": 0.8,
+    "filter_type": "radio",
+    "brightness": -0.2,
+    "speed": 1.0
+  },
+  "explanation": "Brief reasoning"
+}
+```
+
+**`target`** must be one of: `audio`, `audio_fx`, `video_frame`, `video_fx`, `video`, `script`.  
+**`scope`** examples: `global`, `scene:1`, `character:Alex`.
+
 ---
 
-## Character DB extras (voice & swap)
+## Backend API
 
-Optional fields per character in `character_db.json` (also persisted when Phase 1 commits characters via `commit_memory`):
+Base URL (local): `http://127.0.0.1:8000` — the frontend currently calls `http://localhost:8000` explicitly.
 
-| Field | Purpose |
+### Phase 1 — `/api/phase1`
+
+| Method | Path | Description |
+| :--- | :--- | :--- |
+| `POST` | `/run` | Body: `{ "prompt": "<text>" }`. Runs graph until HITL or completion. Returns `awaiting_hitl` with `data.script.scenes` when paused. |
+| `POST` | `/hitl/approve` | Body: `{ "approved": true \| false }`. Resumes graph (runs in a worker thread so WebSocket progress stays responsive). |
+| `GET` | `/character-image/{name}` | Serves portrait PNG from `data/outputs/phase1/image_assets/`. |
+| `GET` | `/script` | Returns parsed `scene_manifest.json`. |
+| `GET` | `/characters` | Returns `character_db.json` characters array. |
+
+### Phase 2 & composition — `/api/phase2`
+
+| Method | Path | Description |
+| :--- | :--- | :--- |
+| `POST` | `/run` | Body: `{ "scene_id": null \| int, "skip_video": bool, "post_proc_map": {} }`. Invokes Studio Floor graph. |
+| `POST` | `/compose` | Query: `transition`, `transition_duration`, `enable_bgm`, `enable_subtitles`, `bgm_volume`. Merges `final_scenes/scene_*.mp4` into `data/outputs/final_output.mp4`. |
+| `GET` | `/final` | Downloads / streams `final_output.mp4`. |
+| `GET` | `/final/status` | Size + optional `composition_metadata.json`. |
+| `GET` | `/outputs` | Lists generated scene videos. |
+| `GET` | `/video/{scene_id}` | Streams `scene_{id}.mp4`. |
+
+### Phase 5 — `/api/phase5`
+
+| Method | Path | Description |
+| :--- | :--- | :--- |
+| `POST` | `/intent` | Body: `{ "query": "<edit text>", "current_state": { ... } }` → structured intent. |
+| `POST` | `/snapshot` | Body: `{ "version", "state", "summary" }` → persists state + asset copies. |
+| `GET` | `/history` | Lists snapshot history entries. |
+| `POST` | `/revert` | Body: `{ "version": "<id>" }` → restored state JSON. |
+| `POST` | `/execute` | Body: `{ "intent_obj": { ... }, "state": { ... } }` → routes regeneration / compositor / post-proc; returns `next_step` hints for the client. |
+
+---
+
+## WebSocket progress
+
+- **URL:** `ws://localhost:8000/ws/progress`
+- **Handler:** `backend/websocket/manager.py` — used by the React hook `frontend/src/hooks/useProgress.ts` for live pipeline updates.
+
+---
+
+## Technology stack
+
+| Area | Technologies |
 | :--- | :--- |
-| `gender` | `male` / `female` / `neutral` (aliases: m/f, …) — picks Edge/Kokoro voice pool in `shared/utils/voice_mapping.py` |
-| `edge_voice` | Explicit Edge voice id (e.g. `en-US-JennyNeural`) |
-| `tts_voice` | Alias for `edge_voice` |
-| `kokoro_voice` | Explicit Kokoro voice id |
+| Orchestration | **LangGraph**, **LangChain Core**, checkpointing (`MemorySaver`) |
+| LLMs | **Groq** (OpenAI-compatible, default `llama-3.3-70b-versatile`), **Google Gemini** (`google-generativeai`, **LangChain Google GenAI** for some agents); configurable via `LLM_PROVIDER`, `GROQ_API_KEY`, `GEMINI_API_KEY` |
+| Structured data | **Pydantic** v2, **TypedDict**, JSON manifests |
+| Backend | **FastAPI**, **Uvicorn**, **python-dotenv** |
+| Frontend | **React 19**, **Vite 8**, **React Router 7**, **Tailwind CSS v4** |
+| Audio | **edge-tts**, **Kokoro**, **soundfile**; tooling in `mcp/tools/audio_tools/` |
+| Video / FX | **FFmpeg** (via custom tools), **OpenCV** (headless), compositor + subtitle tooling |
+| Stock / gen video | **Pexels**, **Hugging Face** (e.g. LTX-Video), **DashScope / Wan2.1** (optional) |
+| Vision / animation | **InsightFace** + **ONNX Runtime**; **SadTalker** via **Gradio Client** (HF Space); optional **Pollinations** / HF image models for portraits |
+| Memory / snapshots | **ChromaDB**; filesystem snapshots under `data/snapshots/` |
+| Language runtime | **Python 3** (see your environment); **Node.js** for the frontend |
 
-**Primary speaker** for each scene is derived from **`dialogue`** line counts (`shared/utils/scene_dialogue.py`). That speaker’s portrait is preferred for video prompts, face swap, and SadTalker `source_image` when enabled.
+External services require keys as documented in **`.env.example`**.
 
 ---
 
-## Multi-method video & lip sync
+## Prerequisites
 
-- **Video:** `VIDEO_GEN_METHODS` — comma-separated order (`pexels`, `hf_ai`, `dashscope`); first method that yields a clip ≥ `VIDEO_GEN_MIN_BYTES` wins.
-- **Lip sync:** `USE_AI_ANIMATION` — `true` uses SadTalker (portrait + audio); `false` muxes stock video + dialogue WAV.
+- **Python 3.10+** recommended (match your course environment).
+- **Node.js 18+** (for Vite).
+- **FFmpeg** available on `PATH` (used by video/audio tools).
+- API keys as needed: Groq and/or Gemini, Hugging Face, Pexels, optional DashScope.
+- For face swap: InsightFace **inswapper** ONNX weights at `INSIGHTFACE_MODEL_PATH` (see `.env.example`).
+- GPU optional but helpful for local ONNX / some HF workflows.
 
 ---
 
-## Setup
+## Setup and how to run
 
-1. Copy `.env.example` to `.env` and set keys (`GOOGLE_API_KEY`, `HF_TOKEN`, `PEXELS_API_KEY`, etc.).
-2. Install dependencies:
+### 1. Clone and environment
 
-```powershell
+```bash
+cd prompt-to-video
+python -m venv .venv
+# Windows PowerShell:
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+pip install "fastapi" "uvicorn[standard]" pytest
 ```
 
-### Face swap (InsightFace) — do I need to set this up?
+Copy **`.env.example`** to **`.env`** and fill in keys. The backend loads `.env` from the **repository root**.
 
-**Only if you want faces in the stock video replaced with your character portraits.** Phase 2 still runs without it: voice, video download, and lip-sync/mux all work. Face swap is optional glue on top.
+> **Note:** Root `requirements.txt` lists the scientific / ML stack; **FastAPI** and **Uvicorn** are required for `backend.app` but are not currently pinned in that file—install them as above (or add them to your environment).
 
-**What must exist on disk**
+### 2. Backend API
 
-The swap tool loads **`inswapper_128.onnx`** (InsightFace’s InSwapper model). By default it looks here:
+From the repo root:
 
-- Path: **`INSIGHTFACE_MODEL_PATH`** in `.env` (see `.env.example`)
-- Default if unset: **`./models/insightface/inswapper_128.onnx`** (relative to the process **current working directory**, usually the repo root when you run `scripts/run_phase2.py` or uvicorn from the project folder)
-
-Create the folder `models/insightface/` under the repo root, download **`inswapper_128.onnx`** from the official InsightFace model distribution for InSwapper (same file name), and point **`INSIGHTFACE_MODEL_PATH`** at that file if you use a non-default location.
-
-You also need **`insightface`** (and its deps, e.g. **OpenCV**) installed — covered by `requirements.txt` if listed there; if swap fails on import, install/fix those packages.
-
-**What happens if the model is missing or fails to load**
-
-The **`face_swapper`** tool does **not** stop the pipeline. It **copies the input video to the “swapped” output path unchanged**. Your Phase 2 logs may still say face swap ran, but **`scene_*_pexels_raw.mp4` and `scene_*_pexels_swapped.mp4` will look the same** (same pixels). That often reads as “face swap isn’t doing anything” — it isn’t, because there was nothing to run without **`inswapper_128.onnx`**.
-
-**Summary**
-
-| Goal | Action |
-| :--- | :--- |
-| Happy with Pexels faces only | **No** InsightFace setup required |
-| Replace faces with character portraits | **Yes** — put **`inswapper_128.onnx`** on disk and set **`INSIGHTFACE_MODEL_PATH`** if needed |
-
----
-
-## Running the System
-
-### 1. Backend (API & Orchestrator)
-
-The backend is built with FastAPI and handles the LangGraph agents.
-
-```powershell
-# Install dependencies
-pip install -r requirements.txt
-
-# Start the FastAPI server
-# The API will be available at http://127.0.0.1:8000
+```bash
 python -m uvicorn backend.app:app --reload --host 127.0.0.1 --port 8000
 ```
 
-**Key CLI Tools:**
-*   **Phase 1 (Writer's Room):** `python main.py`
-*   **Phase 2 (Studio Floor):** `python scripts/run_phase2.py`
-*   **Single Scene Run:** `python scripts/run_phase2.py --scene-id 1`
+This registers MCP tools and exposes REST + WebSocket endpoints.
 
-### 2. Frontend (React UI)
+### 3. Frontend
 
-The frontend is a Vite + React application.
-
-```powershell
-# Navigate to the frontend directory
+```bash
 cd frontend
-
-# Install dependencies
 npm install
-
-# Start the development server
-# The UI will be available at http://localhost:5173
 npm run dev
 ```
 
+Open the URL Vite prints (typically `http://localhost:5173`). Ensure the API is on **port 8000** or update fetch URLs in `frontend/src/pages/Phase1.tsx`, `Phase2.tsx`, `components/EditPanel.tsx`, and `hooks/useProgress.ts`.
+
+### 4. CLI entries
+
+| Command | Purpose |
+| :--- | :--- |
+| `python main.py` | Invokes the **Phase 1** LangGraph once with the sample prompt embedded in `main.py`. For HITL and on-disk artifacts aligned with Phase 2, prefer **`POST /api/phase1/run`** (manifests and `character_db.json` are written under `PHASE1_OUTPUT_DIR` via the `commit_memory` MCP tool). |
+| `python scripts/run_phase2.py` | Runs **Studio Floor** using Phase 1 artifacts on disk (`--help` for options). |
+| `python scripts/test_pipeline.py` | Shortened pipeline smoke test (adjust env such as `NUMBER_OF_SCENES` for cost/time). |
+
 ---
 
-## 🧪 Testing & Validation
+## Testing
 
-The project includes a comprehensive test suite covering core agents, tools, and the end-to-end pipeline.
+Unit tests live under **`tests/unit/`**:
 
-### 1. Unit Tests (Pytest)
-A suite of 11 unit tests validates the logic of individual components (Script parsing, Audio SFX parsing, Video trimming, etc.).
-```powershell
-# Set PYTHONPATH to root and run tests
-$env:PYTHONPATH="."
-.\venv\Scripts\pytest tests/unit
+- `test_script_schema.py` — script JSON parsing / `Scene` validation paths  
+- `test_audio_agent.py`, `test_video_gen_tool.py`, `test_sfx_tool.py` — tooling and agents  
+- `test_intent_agent.py` — edit intent behavior  
+
+Run from repo root:
+
+```bash
+pytest tests/unit -v
 ```
 
-### 2. End-to-End Pipeline Verification
-The master test script runs the full pipeline from a single prompt to a final composited video, validating Phases 1, 2, and 3.
-```powershell
-# Run the full E2E pipeline test
-$env:PYTHONPATH="."
-.\venv\Scripts\python scripts/test_pipeline.py
-```
+---
+
+## Configuration
+
+All significant toggles are documented in **`.env.example`**, including:
+
+- LLM provider and models (`LLM_PROVIDER`, `LLM_MODEL`, `GROQ_API_KEY`, `GEMINI_API_KEY`)
+- Video generation order (`VIDEO_GEN_METHODS`, Pexels / HF / DashScope keys)
+- `USE_AI_ANIMATION` — SadTalking head vs FFmpeg mux with stock video
+- `HITL_AUTO_APPROVE`, `NUMBER_OF_SCENES`, output directories
+- HF image model lists and optional Pollinations tuning variables
+
+Restart **Uvicorn** after changing environment variables loaded at startup.
 
 ---
 
-## 📂 Artifacts & Outputs
+## Course alignment
 
-Artifacts default to `data/outputs/phase1` and `data/outputs/phase2`.
-- **Phase 1**: `scene_manifest.json`, `character_db.json`, `image_assets/`
-- **Phase 2**: `audio_tracks/`, `raw_scenes/`, `final_scenes/`
-- **Final**: `final_output.mp4` (Composited movie)
+This README maps directly to the **Agentic AI Project 2026** requirements:
 
-Override locations with `PHASE1_OUTPUT_DIR` / `PHASE2_OUTPUT_DIR` in `.env`.
+- **Phase 1–5** implemented as modular stages with clear contracts.  
+- **Root README** (this file): overview, stack, setup, execution.  
+- **Dependencies:** `requirements.txt` (+ documented FastAPI/Uvicorn install).  
+- **JSON schema design:** shared schemas + on-disk manifests + Phase 5 intent object.  
+- **Unit tests:** under `tests/unit/`.  
+- **Demo expectations:** full prompt → video pipeline via UI; edit agent + snapshot/revert via Phase 5 APIs (see assignment PDF in `docs/` for submission checklist).
 
 ---
 
-*Developed for the Agentic AI (CS-4015) Course Project.*
+## Further documentation
+
+- **`docs/Agentic AI Final Project - 2026.pdf`** — official brief, submission rules, and rubric context.  
+- **`backend/README.md`** and **`frontend/README.md`** — component-local notes if present.  
+- **`docs/REMAINING_TASKS.md`** — internal tracker for unfinished items.
+
+---
+
+*Developed for Agentic AI (CS-4015), FAST-NUCES Islamabad — Project Montage.*

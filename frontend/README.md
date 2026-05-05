@@ -30,8 +30,15 @@ The application will be available at [http://localhost:5173](http://localhost:51
 
 ## 📂 Structure
 *   `src/pages/Phase1.tsx`: The "Writer's Room" interface for script generation and character design.
-*   `src/pages/Phase2.tsx`: The "Studio Floor" interface for audio/video synthesis and scene playback.
+*   `src/pages/Phase2.tsx`: The "Studio Floor" interface for audio/video synthesis and scene playback. Includes the **Edit Agent Sidebar**.
+*   `src/components/EditPanel.tsx`: The collapsible AI Edit Agent interface for natural language feedback and snapshot management.
 *   `src/pages/HITLModal.tsx`: The review interface for script approval.
 
 ## 🌐 API Integration
 The frontend communicates with the FastAPI backend at `http://127.0.0.1:8000`. Ensure the backend is running for the pipeline to function.
+
+## 🎨 Phase 5: Intelligent Edit Agent
+The frontend now features a right-aligned, collapsible **Edit Agent** sidebar that provides:
+- **Natural Language Control**: Chat with the agent to request surgical changes (e.g., *"Make Alex sound more like a robot"*).
+- **Snapshot Browser**: View and revert to previous versions of your project.
+- **Production Progress**: A dynamic progress bar that highlights **Post-Processing** steps for near-instant stylistic edits.

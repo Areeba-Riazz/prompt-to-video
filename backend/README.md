@@ -25,9 +25,9 @@ The API documentation (Swagger UI) will be available at [http://127.0.0.1:8000/d
 
 ## 🧩 Architecture
 The backend is organized into specialized agents and routes:
-*   **`agents/`**: LangGraph nodes for Story, Audio, and Video generation.
-*   **`routes/`**: FastAPI routers for triggering and monitoring Phase 1 and Phase 2.
-*   **`mcp/`**: Model Context Protocol (MCP) tool registry for handling external API calls (Gemini, ElevenLabs, Pexels, etc.).
+*   **`agents/`**: LangGraph nodes for Story, Audio, and Video generation. Includes the new **`PostProcAgent`** for surgical digital edits.
+*   **`routes/`**: FastAPI routers for triggering and monitoring Phases 1, 2, and the new **Phase 5 (Intelligent Edit)**.
+*   **`mcp/`**: Model Context Protocol (MCP) tool registry for handling external API calls and local processing (e.g., `audio_fx_tool`, `video_fx_tool`).
 
 ## ⚙️ Environment Variables
 Create a `.env` file in the project root with the following keys:
@@ -41,3 +41,10 @@ Create a `.env` file in the project root with the following keys:
 You can also run the agents directly without the web UI:
 *   **Phase 1:** `python main.py`
 *   **Phase 2:** `python scripts/run_phase2.py`
+
+## 🎨 Phase 5: Post-Production Edit Suite
+The backend now supports fine-grained, non-regenerative edits:
+- **Audio FX**: `pitch_shift`, `tempo_adjustment`, `filter_type` (radio, telephone).
+- **Video FX**: `brightness`, `contrast`, `saturation`, `filter_type` (grayscale, sepia).
+
+These are handled by a modular **`Post_proc_node`** inserted at the end of the production graph, allowing for surgical adjustments without re-running expensive LLM or Video models.
