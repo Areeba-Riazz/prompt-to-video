@@ -137,6 +137,11 @@ const Phase2 = () => {
   const [phase2Done, setPhase2Done] = useState(false);
   const [refScript, setRefScript] = useState<{ scenes: Scene[] } | null>(null);
   const [refChars, setRefChars] = useState<Character[]>([]);
+  // Phase 3 composition state
+  const [compositing, setCompositing] = useState(false);
+  const [compositeResult, setCompositeResult] = useState<{ size_mb: number; transition: string; bgm_enabled: boolean; subtitles_enabled: boolean } | null>(null);
+  const [compositeError, setCompositeError] = useState<string | null>(null);
+  const [finalVideoNonce, setFinalVideoNonce] = useState(0);
 
   const loadRef = useCallback(async () => {
     try {
@@ -177,6 +182,23 @@ const Phase2 = () => {
       }
     }
   }, [progress, loading]);
+
+  const handleFinish = async () => {
+    setCompositing(true);
+    setCompositeError(null);
+    setCompositeResult(null);
+    try {
+      const res = await fetch(`${API}/phase2/compose`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Composition failed');
+      setCompositeResult(data.data);
+      setFinalVideoNonce(n => n + 1);
+    } catch (e: unknown) {
+      setCompositeError(e instanceof Error ? e.message : 'Composition failed');
+    } finally {
+      setCompositing(false);
+    }
+  };
 
   const handleRun = async (sceneId: number | null = null) => {
     setLoading(true);
@@ -356,9 +378,20 @@ const Phase2 = () => {
         .p2-cta-hint { font-size: 12px; color: #3a3a44; font-family: 'DM Mono', monospace; }
         .p2-btn-back { background: transparent; color: #9a9288; border: 1px solid #2a2a30; border-radius: 7px; padding: 11px 24px; font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.15s; }
         .p2-btn-back:hover { border-color: #3a3a40; color: #c8c0b0; }
-        .p2-btn-regen { background: linear-gradient(135deg, #6e9ec8 0%, #5a8ab8 100%); color: #fff; border: none; border-radius: 7px; padding: 11px 24px; font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+        .p2-btn-regen { background: linear-gradient(135deg, #6e9ec8 0%, #5a8ab8 100%); color: #fff; border: none; border-radius: 7px; padding: 11px 24px; font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; display: inline-flex; align-items: center; gap: 8px; }
         .p2-btn-regen:hover:not(:disabled) { transform: translateY(-1px); }
         .p2-btn-regen:disabled { opacity: 0.6; cursor: not-allowed; }
+        .p2-btn-finish { background: linear-gradient(135deg, #4a9e6f 0%, #3d8a5f 100%); color: #fff; border: none; border-radius: 7px; padding: 11px 28px; font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; gap: 8px; box-shadow: 0 4px 12px rgba(74,158,111,0.25); }
+        .p2-btn-finish:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(74,158,111,0.35); }
+        .p2-btn-finish:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+        /* Composition result panel */
+        .p2-compose-banner { background: rgba(74,158,111,0.08); border: 1px solid rgba(74,158,111,0.25); border-radius: 12px; padding: 28px 32px; margin-bottom: 32px; }
+        .p2-compose-banner--err { background: rgba(208,128,128,0.08); border-color: rgba(208,128,128,0.25); }
+        .p2-compose-title { font-family: 'Playfair Display', serif; font-size: 18px; color: #f0e8d8; margin-bottom: 6px; display: flex; align-items: center; gap: 10px; }
+        .p2-compose-meta { font-family: 'DM Mono', monospace; font-size: 11px; color: #6a6268; margin-bottom: 18px; display: flex; gap: 18px; flex-wrap: wrap; }
+        .p2-compose-meta span { color: #4a9e6f; }
+        .p2-compose-video-wrap { background: #000; border-radius: 8px; overflow: hidden; border: 1px solid rgba(74,158,111,0.2); }
+        .p2-compose-progress { display: flex; align-items: center; gap: 12px; color: #4a9e6f; font-size: 13px; font-family: 'DM Mono', monospace; padding: 8px 0; }
       `}</style>
 
       <div className="p2-root">
@@ -509,15 +542,67 @@ const Phase2 = () => {
               </>
             )}
 
+            {/* ── Composition result panel ── */}
+            {compositing && (
+              <div className="p2-compose-banner" style={{ marginBottom: '32px' }}>
+                <div className="p2-compose-progress">
+                  <div className="p2-spinner" style={{ borderColor: 'rgba(74,158,111,0.25)', borderTopColor: '#4a9e6f' }} />
+                  <span>Compositing final film — merging clips, mixing BGM, burning subtitles…</span>
+                </div>
+              </div>
+            )}
+
+            {compositeError && (
+              <div className="p2-compose-banner p2-compose-banner--err" style={{ marginBottom: '32px' }}>
+                <div className="p2-compose-title">⚠️ Composition Failed</div>
+                <div style={{ color: '#D08080', fontSize: '13px' }}>{compositeError}</div>
+              </div>
+            )}
+
+            {compositeResult && (
+              <div className="p2-compose-banner" style={{ marginBottom: '32px' }}>
+                <div className="p2-compose-title">🎬 Final Film Ready</div>
+                <div className="p2-compose-meta">
+                  <div>Size: <span>{compositeResult.size_mb} MB</span></div>
+                  <div>Transition: <span>{compositeResult.transition}</span></div>
+                  <div>BGM: <span>{compositeResult.bgm_enabled ? 'ON' : 'OFF'}</span></div>
+                  <div>Subtitles: <span>{compositeResult.subtitles_enabled ? 'ON' : 'OFF'}</span></div>
+                </div>
+                <div className="p2-compose-video-wrap">
+                  <video
+                    key={finalVideoNonce}
+                    src={`${API}/phase2/final?v=${finalVideoNonce}`}
+                    controls
+                    preload="metadata"
+                    style={{ width: '100%', maxHeight: '520px', display: 'block' }}
+                  />
+                </div>
+                <div style={{ marginTop: '14px', display: 'flex', justifyContent: 'flex-end' }}>
+                  <a
+                    href={`${API}/phase2/final`}
+                    download="final_output.mp4"
+                    style={{ color: '#4a9e6f', fontSize: '13px', fontFamily: 'DM Mono, monospace', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    ⬇ Download final_output.mp4
+                  </a>
+                </div>
+              </div>
+            )}
+
             <div className="p2-cta-bar">
               <div className="p2-cta-hint">← Writers' Room</div>
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <button className="p2-btn-back" onClick={() => navigate('/')} disabled={loading}>
+              <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                <button className="p2-btn-back" onClick={() => navigate('/')} disabled={loading || compositing}>
                   {loading ? 'Production Running...' : '← Back to Phase 1'}
                 </button>
                 {phase2Done && (
-                  <button className="p2-btn-regen" onClick={() => handleRun()} disabled={loading}>
-                    {loading ? 'Running…' : 'Regenerate'}
+                  <button className="p2-btn-regen" onClick={() => handleRun()} disabled={loading || compositing}>
+                    {loading ? <><div className="p2-spinner" />Running…</> : '🔄 Regenerate Pipeline'}
+                  </button>
+                )}
+                {phase2Done && (
+                  <button className="p2-btn-finish" onClick={handleFinish} disabled={loading || compositing}>
+                    {compositing ? <><div className="p2-spinner" style={{ borderColor: 'rgba(255,255,255,0.25)', borderTopColor: '#fff' }} />Compositing…</> : '✨ Finish Film'}
                   </button>
                 )}
               </div>

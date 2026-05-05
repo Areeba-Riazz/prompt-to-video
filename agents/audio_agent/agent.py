@@ -11,6 +11,7 @@ LangGraph node function exported:
 import wave
 import logging
 import os
+import shutil
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("VoiceSynth")
@@ -186,10 +187,33 @@ def _concat_wavs(paths: List[str], out_path: str) -> None:
 # Voice Synthesis Node
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _parse_line_with_sfx(text: str) -> List[Dict[str, str]]:
+    """
+    Split a dialogue line into 'speech' and 'sfx' segments.
+    Example: "(laughs) Hello world" -> [{'type': 'sfx', 'val': 'laughs'}, {'type': 'speech', 'val': 'Hello world'}]
+    """
+    import re
+    # Match (...) or [...]
+    pattern = r"([\[\(].*?[\)\]])"
+    parts = re.split(pattern, text)
+    segments = []
+    for p in parts:
+        p = p.strip()
+        if not p:
+            continue
+        if p.startswith(("(", "[")) and p.endswith((")", "]")):
+            cue = p[1:-1].strip()
+            if cue:
+                segments.append({"type": "sfx", "val": cue})
+        else:
+            segments.append({"type": "speech", "val": p})
+    return segments
+
+
 def voice_synth_node(state: StudioState) -> dict:
     """
     Synthesizes per-scene audio via MCP voice_cloning_synthesizer tool.
-    Concatenates all dialogue lines per scene with 0.3 s silence between.
+    Handles parenthetical SFX (e.g. laughter) by fetching clips from Freesound.
     """
     registry = _get_registry()
     output_root = state.get("output_root", os.environ.get("PHASE2_OUTPUT_DIR", "data/outputs/phase2"))
@@ -215,30 +239,47 @@ def voice_synth_node(state: StudioState) -> dict:
         for i, line in enumerate(dialogue_lines):
             speaker = line.get("speaker", "A")
             text = line.get("line") or ""
-            emotion = line.get("emotion") or _infer_emotion(
-                line.get("line", ""),
-                line.get("visual_cue"),
-            )
+            emotion = line.get("emotion") or _infer_emotion(text, line.get("visual_cue"))
             char_info = char_db.get(speaker, {})
-            ref_audio = char_info.get("reference_audio", None)
+            
+            # Split line into SFX and Speech
+            segments = _parse_line_with_sfx(text)
+            line_segments: List[str] = []
+            
+            for j, seg in enumerate(segments):
+                seg_path = os.path.join(temp_dir, f"line_{i:02d}_seg_{j:02d}.wav")
+                if seg["type"] == "sfx":
+                    logger.info(f"🔊 [VoiceSynth] Fetching SFX for: {seg['val']}")
+                    res = registry.invoke("sfx_tool", {"cue": seg["val"], "output_path": seg_path})
+                    if res.get("ok"):
+                        line_segments.append(seg_path)
+                else:
+                    logger.info(f"🗣️ [VoiceSynth] Synthesizing speech: {seg['val'][:30]}...")
+                    try:
+                        registry.invoke("voice_cloning_synthesizer", {
+                            "character_name": speaker,
+                            "dialogue": seg["val"],
+                            "output_path": seg_path,
+                            "reference_audio_path": char_info.get("reference_audio"),
+                            "emotion": emotion,
+                            "gender": char_info.get("gender"),
+                            "edge_voice": char_info.get("edge_voice"),
+                            "tts_voice": char_info.get("tts_voice"),
+                            "kokoro_voice": char_info.get("kokoro_voice"),
+                        })
+                        if os.path.exists(seg_path):
+                            line_segments.append(seg_path)
+                    except Exception as e:
+                        logger.warning(f"Speech synth failed for seg {j}: {e}")
 
-            line_path = os.path.join(temp_dir, f"line_{i:02d}.wav")
-            try:
-                registry.invoke("voice_cloning_synthesizer", {
-                    "character_name": speaker,
-                    "dialogue": text,
-                    "output_path": line_path,
-                    "reference_audio_path": ref_audio,
-                    "emotion": emotion,
-                    "gender": char_info.get("gender"),
-                    "edge_voice": char_info.get("edge_voice"),
-                    "tts_voice": char_info.get("tts_voice"),
-                    "kokoro_voice": char_info.get("kokoro_voice"),
-                })
-                if os.path.exists(line_path):
-                    segment_paths.append(line_path)
-            except Exception as e:
-                print(f"[VoiceNode] Line {i} scene {scene_id} failed: {e}")
+            if line_segments:
+                line_final = os.path.join(temp_dir, f"line_{i:02d}.wav")
+                if len(line_segments) > 1:
+                    _concat_wavs(line_segments, line_final)
+                else:
+                    # Just move/copy the single segment to the expected name
+                    shutil.copy2(line_segments[0], line_final)
+                segment_paths.append(line_final)
 
         combined_path = os.path.join(output_root, "audio_tracks", f"{scene_tag}.wav")
         os.makedirs(os.path.dirname(combined_path), exist_ok=True)

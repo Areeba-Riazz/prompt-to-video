@@ -23,6 +23,9 @@ class StudioState(TypedDict):
     final_scenes: Annotated[List[Dict[str, Any]], operator.add]
     task_logs: Annotated[List[Dict[str, Any]], operator.add]
 
+    # Phase 3 composition output
+    final_output_path: str
+
     # Control
     status: str
     errors: Annotated[List[str], operator.add]

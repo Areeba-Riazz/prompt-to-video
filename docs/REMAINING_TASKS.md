@@ -5,10 +5,10 @@ This document outlines the remaining work required to fulfill the submission req
 ## 🔴 Critical Path: Missing Core Functionalities
 
 ### Phase 3 — Final Video Composition
-*   [ ] **Final Movie Stitches:** Implement the `compositor_tool.py` to merge all `scene_*.mp4` files into a single `final_output.mp4`.
-*   [ ] **Subtitle Overlay:** Implement the `subtitle_tool.py` using FFmpeg to burn subtitles into the final video.
-*   [ ] **Transitions:** Add simple fade or cross-dissolve transitions between scenes during the final compositing step.
-*   [ ] **Background Music (BGM):** Integrate background music selection or generation per scene mood (as per Phase 2 requirements).
+*   [x] **Final Movie Stitches:** Implement the `compositor_tool.py` to merge all `scene_*.mp4` files into a single `final_output.mp4`.
+*   [x] **Subtitle Overlay:** Implement the `subtitle_tool.py` using FFmpeg to burn subtitles into the final video.
+*   [x] **Transitions:** Add simple fade or cross-dissolve transitions between scenes during the final compositing step.
+*   [x] **Background Music (BGM):** Integrate background music selection or generation per scene mood (as per Phase 2 requirements).
 
 ### Phase 4 — Web Interface & Orchestration
 *   [x] **Real-time Progress:** Implement WebSockets or Server-Sent Events (SSE) to show phase-level progress.

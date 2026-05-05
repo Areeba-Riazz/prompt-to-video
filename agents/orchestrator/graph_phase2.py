@@ -15,6 +15,7 @@ logger = logging.getLogger("StudioFloor")
 from shared.schemas.phase2_state import StudioState
 from agents.audio_agent.agent import voice_synth_node
 from agents.video_agent.agent import (
+    compositor_node,
     face_swap_node,
     lip_sync_node,
     memory_commit_node,
@@ -83,7 +84,7 @@ def _get_registry():
 
 def studio_floor_workflow():
     """
-    Builds and compiles the Phase 2 LangGraph studio workflow.
+    Builds and compiles the Phase 2+3 LangGraph studio workflow.
 
     Flow:
         Scene_parser_node
@@ -98,7 +99,7 @@ def studio_floor_workflow():
             ↓
         Memory_commit_node
             ↓
-        END
+        END   ← Phase 3 compositor is triggered on demand via /api/phase2/compose
     """
     workflow = StateGraph(StudioState)
 

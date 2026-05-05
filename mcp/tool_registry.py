@@ -50,13 +50,17 @@ class MCPRegistry:
 
 def register_all_tools():
     """
-    Register all Phase 2 MCP tools.
+    Register all Phase 2 & 3 MCP tools.
     Agents call registry.discover() to find tools at runtime.
     """
     from mcp.tools.audio_tools.tts_tool import VoiceSynthesisTool
+    from mcp.tools.audio_tools.bgm_tool import BGMTool
+    from mcp.tools.audio_tools.sfx_tool import SFXTool
     from mcp.tools.video_tools.video_gen_tool import VideoGenerationTool
     from mcp.tools.video_tools.lip_sync_tool import LipSyncTool
     from mcp.tools.video_tools.ffmpeg_tool import FFmpegTool
+    from mcp.tools.video_tools.compositor_tool import CompositorTool
+    from mcp.tools.video_tools.subtitle_tool import SubtitleTool
     from mcp.tools.vision_tools.image_gen_tool import ImageGenerationTool, QueryStockFootageTool
     from mcp.tools.vision_tools.face_swap_tool import FaceSwapTool
     from mcp.tools.vision_tools.identity_tool import IdentityValidatorTool
@@ -67,6 +71,10 @@ def register_all_tools():
     registry.register(VideoGenerationTool())
     registry.register(LipSyncTool())
     registry.register(FFmpegTool())
+    registry.register(CompositorTool())
+    registry.register(SubtitleTool())
+    registry.register(BGMTool())
+    registry.register(SFXTool())
     registry.register(ImageGenerationTool())
     registry.register(QueryStockFootageTool())
     registry.register(FaceSwapTool())
@@ -74,7 +82,7 @@ def register_all_tools():
     registry.register(TextGeneratorTool())
     registry.register(MemoryCommitTool())
     registry.register(TaskGraphTool())
-    print(f"[MCP] Phase 2: {len(registry.discover())} tools registered successfully.")
+    print(f"[MCP] Phase 2+3: {len(registry.discover())} tools registered successfully.")
 
 # Global singleton instance
 registry = MCPRegistry()
