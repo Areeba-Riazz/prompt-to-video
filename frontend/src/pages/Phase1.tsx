@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import HITLModal from './HITLModal';
+import { useProgress } from '../hooks/useProgress';
 
 const Phase1 = () => {
   const navigate = useNavigate();
+  const progress = useProgress();
   const [prompt, setPrompt] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
@@ -15,16 +17,15 @@ const Phase1 = () => {
   const [pendingScript, setPendingScript] = useState<any>(null);
 
   useEffect(() => {
-    if (!isProcessing) { setCurrentStepIndex(0); return; }
-    const t = setInterval(() => setCurrentStepIndex(p => p < 3 ? p + 1 : p), 10000);
-    return () => clearInterval(t);
-  }, [isProcessing]);
-
-  useEffect(() => {
-    if (!isApproving) { setPostApprovalStepIdx(0); return; }
-    const t = setInterval(() => setPostApprovalStepIdx(p => p < 1 ? p + 1 : p), 8000);
-    return () => clearInterval(t);
-  }, [isApproving]);
+    if (progress?.phase === 'phase1') {
+      const steps = ['Scriptwriter', 'Character Designer', 'Image Synthesis', 'Validator'];
+      const idx = steps.indexOf(progress.step);
+      if (idx !== -1) {
+        if (isProcessing) setCurrentStepIndex(idx);
+        if (isApproving) setPostApprovalStepIdx(idx - 1); // Character Designer is index 1, Image Synthesis is index 2
+      }
+    }
+  }, [progress, isProcessing, isApproving]);
 
   const handleProcess = async () => {
     setIsProcessing(true);
@@ -268,7 +269,11 @@ const Phase1 = () => {
 
       <div className="pm-root">
         <aside className="pm-sidebar">
-          <div className="pm-logo">
+          <div 
+            className="pm-logo" 
+            onClick={() => { if (!isProcessing && !isApproving) navigate('/'); }}
+            style={{ cursor: (!isProcessing && !isApproving) ? 'pointer' : 'default' }}
+          >
             <div className="pm-logo-eyebrow">Project</div>
             <div className="pm-logo-title">Montage</div>
           </div>
@@ -415,7 +420,9 @@ const Phase1 = () => {
                       <span className="pm-results-title">Characters</span>
                     </div>
                     <div className="pm-char-grid">
-                      {phase1Output.characters.map((char: any) => (
+                      {phase1Output.characters.map((char: any) => {
+                        const cap = (s: string) => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+                        return (
                         <div key={char.name} className="pm-char-card">
                           <div className="pm-char-img-wrap">
                             {char.image_path ? (
@@ -431,16 +438,22 @@ const Phase1 = () => {
                           </div>
                           <div className="pm-char-body">
                             <div className="pm-char-name">{char.name}</div>
-                            <div className="pm-char-desc">{char.appearance_description}</div>
-                            {char.reference_style && <div className="pm-char-style">Style: {char.reference_style}</div>}
-                            <div className="pm-char-tags">
-                              {char.personality_traits?.map((t: string) => (
-                                <span key={t} className="pm-char-tag">{t}</span>
-                              ))}
-                            </div>
+                            {char.personality && (
+                              <div style={{marginBottom:'8px'}}>
+                                <div style={{fontFamily:"'DM Mono', monospace", fontSize:'9px', letterSpacing:'0.12em', textTransform:'uppercase', color:'#c8a96e', marginBottom:'4px'}}>Personality</div>
+                                <div className="pm-char-desc">{cap(char.personality)}</div>
+                              </div>
+                            )}
+                            {char.appearance && (
+                              <div>
+                                <div style={{fontFamily:"'DM Mono', monospace", fontSize:'9px', letterSpacing:'0.12em', textTransform:'uppercase', color:'#6e9ec8', marginBottom:'4px'}}>Appearance</div>
+                                <div className="pm-char-desc" style={{color:'#8a8880'}}>{cap(char.appearance)}</div>
+                              </div>
+                            )}
                           </div>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}

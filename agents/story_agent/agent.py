@@ -23,27 +23,12 @@ logging.basicConfig(
     datefmt="%H:%M:%S"
 )
 logger = logging.getLogger("StoryAgent")
+from shared.utils.progress import report_progress
+from shared.utils.llm_client import chat_json, chat_text  # centralised LLM calls
 
 from shared.schemas.state import MontageState, Scene, Character
 from mcp.tool_registry import registry as mcp_registry
 from agents.story_agent.planner import fallback_scenes, scenes_to_raw_script
-
-try:
-    from langchain_core.messages import HumanMessage
-except ImportError:
-    HumanMessage = None  # type: ignore[misc, assignment]
-
-try:
-    from langchain_google_genai import ChatGoogleGenerativeAI
-    HAS_GENAI = True
-except ImportError:
-    HAS_GENAI = False
-
-try:
-    from langchain_groq import ChatGroq
-    HAS_GROQ = True
-except ImportError:
-    HAS_GROQ = False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -75,71 +60,47 @@ class ScriptwriterAgent:
     """
     Transforms abstract prompts into structured scripts.
     Fulfils the reasoning loop: Decomposition -> Expansion -> Visual Cue Injection.
+    Uses the shared llm_client for all LLM calls (provider selected via LLM_PROVIDER env var).
     """
-
-    def __init__(self, model_name: str = "gemini-pro"):
-        self.model_name = model_name
-        if HAS_GENAI:
-            try:
-                self.llm = ChatGoogleGenerativeAI(
-                    model=model_name,
-                    google_api_key=os.environ.get("GEMINI_API_KEY")
-                )
-            except Exception as e:
-                logger.error(f"❌ [ScriptwriterAgent] Failed to initialize Gemini LLM: {e}")
-                self.llm = None
-        else:
-            self.llm = None
 
     def generate(self, state: MontageState) -> MontageState:
         logger.info("🎬 [Scriptwriter] Started autonomous script generation...")
         prompt = state.get("user_prompt", "")
         num_scenes = os.environ.get("NUMBER_OF_SCENES", "3")
+        provider = os.environ.get("LLM_PROVIDER", "groq").lower()
 
         # Reason 1: Decomposition & Discovery
         tools = mcp_registry.get_available_tools()
-        print(f"discovered tools: {[t['name'] for t in tools]}")
+        logger.info(f"🔍 [Scriptwriter] Provider={provider!r}, discovered tools: {[t['name'] for t in tools]}")
 
-        # Reason 2: Expansion (LLM call or deterministic fallback)
-        llm_text = None
-        
-        if self.llm and HumanMessage is not None:
+        # Reason 2: Expansion — single LLM call via shared client
+        sys_prompt = _SYSTEM_PROMPT.replace("{number_of_scenes}", str(num_scenes))
+        llm_result: dict | None = None
+        try:
+            llm_result = chat_json(
+                system=sys_prompt,
+                user=f"User Prompt: {prompt}",
+                temperature=0.7,
+            )
+            logger.info("✅ [Scriptwriter] Script generated successfully via llm_client.")
+        except Exception as e:
+            logger.warning(f"⚠️ [Scriptwriter] llm_client.chat_json failed: {e}. Using deterministic fallback.")
+
+        if llm_result is not None:
             try:
-                sys_prompt = _SYSTEM_PROMPT.replace("{number_of_scenes}", str(num_scenes))
-                response = self.llm.invoke(
-                    [HumanMessage(content=f"{sys_prompt}\n\nUser Prompt: {prompt}")]
-                )
-                llm_text = response.content
-                logger.info("✅ [Scriptwriter] Successfully generated script via Gemini.")
-            except Exception as e:
-                logger.warning(f"⚠️ [Scriptwriter] Gemini Invoke failed: {e}. Attempting Groq fallback...")
-        
-        # Groq Fallback
-        if not llm_text and HAS_GROQ and os.environ.get("GROQ_API_KEY") and HumanMessage is not None:
-            try:
-                groq_llm = ChatGroq(
-                    model_name="llama-3.1-8b-instant",
-                    groq_api_key=os.environ.get("GROQ_API_KEY")
-                )
-                sys_prompt = _SYSTEM_PROMPT.replace("{number_of_scenes}", str(num_scenes))
-                response = groq_llm.invoke(
-                    [HumanMessage(content=f"{sys_prompt}\n\nUser Prompt: {prompt}")]
-                )
-                llm_text = response.content
-                logger.info("✅ [Scriptwriter] Successfully generated script via Groq fallback.")
-            except Exception as e2:
-                logger.error(f"❌ [Scriptwriter] Groq Invoke failed: {e2}. Forcing deterministic fallback.")
-                
-        if llm_text:
-            try:
-                state["raw_script"] = llm_text
-                parsed = self._parse_scene_payload(llm_text)
+                # Wrap in canonical envelope if the model returned the scenes array directly
+                if "scenes" not in llm_result and isinstance(llm_result, list):
+                    llm_result = {"scenes": llm_result}
+                raw_text = json.dumps(llm_result)
+                state["raw_script"] = raw_text
+                parsed = self._parse_scene_payload(raw_text)
                 state["scenes"] = parsed if parsed else fallback_scenes(prompt)
             except Exception as parse_e:
-                logger.error(f"❌ [Scriptwriter] Failed to parse generated JSON script: {parse_e}")
+                logger.error(f"❌ [Scriptwriter] Failed to parse generated JSON: {parse_e}")
                 state["scenes"] = fallback_scenes(prompt)
                 state["raw_script"] = scenes_to_raw_script(state["scenes"])
         else:
+            logger.warning("⚠️ [Scriptwriter] LLM unavailable — FORCING DETERMINISTIC FALLBACK (Kael & Sora).")
             state["scenes"] = fallback_scenes(prompt)
             state["raw_script"] = scenes_to_raw_script(state["scenes"])
 
@@ -414,38 +375,18 @@ def _parse_profile_blob(blob: str) -> Optional[Dict[str, Any]]:
 
 
 def _profile_llm_json(prompt: str) -> Optional[Dict[str, Any]]:
-    """Gemini then Groq; returns parsed dict or None."""
-    if HumanMessage is None:
-        return None
-    messages = [HumanMessage(content=prompt.strip())]
-
-    writer = ScriptwriterAgent()
-    if writer.llm:
-        try:
-            raw = writer.llm.invoke(messages).content
-            blob = _extract_json_object(raw)
-            if blob:
-                parsed = _parse_profile_blob(blob)
-                if parsed:
-                    return parsed
-        except Exception as e:
-            logger.warning(f"⚠️ [CharacterDesigner] Gemini profile call failed: {e}")
-
-    if HAS_GROQ and os.environ.get("GROQ_API_KEY"):
-        try:
-            groq_llm = ChatGroq(
-                model_name="llama-3.1-8b-instant",
-                groq_api_key=os.environ.get("GROQ_API_KEY"),
-            )
-            raw = groq_llm.invoke(messages).content
-            blob = _extract_json_object(raw)
-            if blob:
-                parsed = _parse_profile_blob(blob)
-                if parsed:
-                    return parsed
-        except Exception as e:
-            logger.warning(f"⚠️ [CharacterDesigner] Groq profile call failed: {e}")
-
+    """
+    Call the shared llm_client to generate a character profile JSON.
+    Returns a parsed dict, or None if the call fails or returns unusable output.
+    """
+    # System instruction is baked into the prompt itself; use a neutral framing.
+    system = "You are a visual development lead for film. Return ONLY valid JSON as instructed."
+    try:
+        result = chat_json(system=system, user=prompt.strip(), temperature=0.7)
+        if isinstance(result, dict) and result:
+            return result
+    except Exception as e:
+        logger.warning(f"⚠️ [CharacterDesigner] llm_client.chat_json failed for profile: {e}")
     return None
 
 
@@ -461,6 +402,18 @@ class CharacterDesigner:
 
     def process(self, state: MontageState) -> MontageState:
         logger.info("🎭 [Character Designer] Extracting character identities...")
+
+        # ── Wipe previous character DB so a new script starts clean ──────────
+        import os as _os
+        _db_path = _os.path.join(
+            _os.environ.get("PHASE1_OUTPUT_DIR", "data/outputs/phase1"),
+            "character_db.json",
+        )
+        if _os.path.exists(_db_path):
+            _os.remove(_db_path)
+            logger.info("🗑️ [Character Designer] Cleared previous character_db.json for new script.")
+        # ─────────────────────────────────────────────────────────────────────
+
         scenes = state.get("scenes", [])
         unique_names: set = set()
         for scene in scenes:
@@ -475,6 +428,7 @@ class CharacterDesigner:
                 appearance=profile.get("appearance", "Humanoid"),
                 voice_profile=profile.get("voice_profile", "Natural, steady"),
                 reference_style=profile.get("reference_style", "Cinematic"),
+                gender=profile.get("gender"),
             )
             characters.append(char)
             mcp_registry.call_tool("commit_memory", key=f"char_{name}", data=char.dict())
@@ -482,6 +436,7 @@ class CharacterDesigner:
         state["characters"] = characters
         state["current_agent"] = "CharacterDesigner"
         return state
+
 
     def _generate_ai_profile(self, name: str, user_prompt: str, scenes: List[Scene]) -> dict:
         """LLM-written profile grounded in script context; concrete heuristic fallback if thin or offline."""
@@ -505,9 +460,10 @@ Hard rules:
 - "voice_profile": timbre, pace, accent hints if any — not generic "professional clear balanced".
 - "personality": brief specific behavioral traits under pressure.
 - "reference_style": short color/mood label for portraits only (no location words).
+- "gender": exactly one of "male", "female", or "neutral" — infer from the character name and script context.
 
 Return ONLY valid JSON:
-{{"personality":"...","appearance":"...","voice_profile":"...","reference_style":"..."}}"""
+{{"personality":"...","appearance":"...","voice_profile":"...","reference_style":"...","gender":"male|female|neutral"}}"""
 
         parsed = _profile_llm_json(prompt)
         if not parsed:
@@ -526,6 +482,7 @@ Return ONLY valid JSON:
                 "appearance": heuristic["appearance"],
                 "voice_profile": _field("voice_profile") or heuristic["voice_profile"],
                 "reference_style": _field("reference_style") or heuristic["reference_style"],
+                "gender": _field("gender") or None,
             }
             for key in ("personality", "voice_profile", "reference_style"):
                 if len(merged[key]) < 18:
@@ -537,6 +494,7 @@ Return ONLY valid JSON:
             "appearance": appearance,
             "voice_profile": _field("voice_profile") or heuristic["voice_profile"],
             "reference_style": _field("reference_style") or heuristic["reference_style"],
+            "gender": _field("gender") or None,
         }
         for key in ("personality", "voice_profile", "reference_style"):
             if len(out[key]) < 12:
@@ -624,12 +582,25 @@ class ImageSynthesizer:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def scriptwriter_node(state: MontageState) -> MontageState:
+    report_progress("phase1", "Scriptwriter", "running", "Generating screenplay...")
     return ScriptwriterAgent().generate(state)
 
 
 def character_node(state: MontageState) -> MontageState:
+    import time
+    time.sleep(0.5) # Give the WebSocket a moment to sync after the HTTP Approve call
+    report_progress("phase1", "Character Designer", "running", "Designing character profiles...")
     return CharacterDesigner().process(state)
 
 
 def image_node(state: MontageState) -> MontageState:
+    report_progress("phase1", "Image Synthesis", "running", "Synthesizing character portraits...")
     return ImageSynthesizer().synthesize(state)
+
+def memory_commit_node(state: MontageState) -> dict:
+    """Final node to commit all results to persistent memory via MCP."""
+    report_progress("phase1", "Finalizing", "running", "Committing to memory...")
+    print("--- [Memory Commit] Finalizing persistent records ---")
+    mcp_registry.call_tool("commit_memory", key="final_manifest", data=state.get("scenes"))
+    report_progress("phase1", "Done", "completed", "Phase 1 Complete!")
+    return {"status": "completed"}

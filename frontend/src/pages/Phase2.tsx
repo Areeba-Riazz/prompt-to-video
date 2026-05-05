@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useProgress } from '../hooks/useProgress';
 
 interface Phase2SceneResult {
   scene_id: number;
@@ -22,7 +23,19 @@ function dedupeScenesById(scenes: Phase2SceneResult[]): Phase2SceneResult[] {
 }
 
 // ── Scene accordion item ─────────────────────────────────────────────────────
-const SceneAccordion = ({ result, refScene, videoNonce }: { result: Phase2SceneResult; refScene?: Scene; videoNonce: number }) => {
+const SceneAccordion = ({
+  result,
+  refScene,
+  videoNonce,
+  onRegen,
+  isRegenerating = false,
+}: {
+  result: Phase2SceneResult;
+  refScene?: Scene;
+  videoNonce: number;
+  onRegen: (sceneId: number) => void;
+  isRegenerating?: boolean;
+}) => {
   const [open, setOpen] = useState(false);
   const mp4Path = result.raw_mp4_path || result.final_video_path;
   const videoSrc = !result.error && mp4Path
@@ -33,23 +46,32 @@ const SceneAccordion = ({ result, refScene, videoNonce }: { result: Phase2SceneR
     <div className="p2-acc">
       <button className={`p2-acc-hd ${open ? 'p2-acc-hd--open' : ''}`} onClick={() => setOpen(o => !o)}>
         <div className="p2-acc-left">
-          <span className="p2-acc-icon">{result.error ? '❌' : '🎬'}</span>
+          <span className="p2-acc-icon">{isRegenerating ? '⏳' : result.error ? '❌' : '🎬'}</span>
           <div>
             <div className="p2-acc-title">Scene {result.scene_id}</div>
             {refScene && <div className="p2-acc-loc">{refScene.location}</div>}
           </div>
         </div>
         <div className="p2-acc-right">
-          <span className={`p2-acc-badge ${result.error ? 'p2-acc-badge--err' : 'p2-acc-badge--ok'}`}>
-            {result.error ? 'ERROR' : 'READY'}
-          </span>
+          {isRegenerating ? (
+            <span className="p2-acc-badge p2-acc-badge--loading">GENERATING…</span>
+          ) : (
+            <span className={`p2-acc-badge ${result.error ? 'p2-acc-badge--err' : 'p2-acc-badge--ok'}`}>
+              {result.error ? 'ERROR' : 'READY'}
+            </span>
+          )}
           <span className="p2-acc-chevron">{open ? '▲' : '▼'}</span>
         </div>
       </button>
 
       {open && (
         <div className="p2-acc-body">
-          {result.error ? (
+          {isRegenerating ? (
+            <div className="p2-regen-loading">
+              <div className="p2-spinner" />
+              <span>Regenerating Scene {result.scene_id}…</span>
+            </div>
+          ) : result.error ? (
             <div className="p2-scene-error">⚠️ {result.error}</div>
           ) : (
             <>
@@ -72,7 +94,7 @@ const SceneAccordion = ({ result, refScene, videoNonce }: { result: Phase2SceneR
 
           {refScene && (
             <div className="p2-scene-script">
-              <div className="p2-scene-script-lbl">Script</div>
+              <div className="p2-scene-script-lbl">Script & Actions</div>
               {refScene.dialogue.map((d, i) => (
                 <div key={i} className="p2-script-line">
                   <div className="p2-script-spk">{d.speaker}</div>
@@ -87,6 +109,15 @@ const SceneAccordion = ({ result, refScene, videoNonce }: { result: Phase2SceneR
                   </div>
                 </div>
               ))}
+              <div style={{ padding: '12px', borderTop: '1px solid #1e1e22', display: 'flex', justifyContent: 'flex-end' }}>
+                <button 
+                  className="p2-btn-regen" 
+                  style={{ padding: '6px 12px', fontSize: '11px' }}
+                  onClick={() => onRegen(result.scene_id)}
+                >
+                  🔄 Regenerate Scene {result.scene_id}
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -98,6 +129,7 @@ const SceneAccordion = ({ result, refScene, videoNonce }: { result: Phase2SceneR
 // ── Main Phase2 page ─────────────────────────────────────────────────────────
 const Phase2 = () => {
   const navigate = useNavigate();
+  const progress = useProgress();
   const [loading, setLoading] = useState(false);
   const [loadingStepIdx, setLoadingStepIdx] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -117,6 +149,8 @@ const Phase2 = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   /** Bumps when a run finishes so `<video>` URLs don't stick to cached prior responses in the browser. */
   const [runNonce, setRunNonce] = useState(0);
+  /** Which single scene is currently being regenerated (null = full run). */
+  const [regeneratingSceneId, setRegeneratingSceneId] = useState<number | null>(null);
 
   const loadOutputsFromDisk = useCallback(async () => {
     try {
@@ -135,24 +169,48 @@ const Phase2 = () => {
   useEffect(() => { void loadRef(); }, [loadRef]);
 
   useEffect(() => {
-    if (!loading) { setLoadingStepIdx(0); return; }
-    const t = setInterval(() => setLoadingStepIdx(p => p < 3 ? p + 1 : p), 9000);
-    return () => clearInterval(t);
-  }, [loading]);
+    if (progress?.phase === 'phase2') {
+      const steps = ['Video Gen', 'Voice Synth', 'Face Swap', 'Lip Sync'];
+      const idx = steps.indexOf(progress.step);
+      if (idx !== -1 && loading) {
+        setLoadingStepIdx(idx);
+      }
+    }
+  }, [progress, loading]);
 
-  const handleRun = async () => {
-    setLoading(true); setError(null); setSceneResults([]); setPhase2Done(false);
+  const handleRun = async (sceneId: number | null = null) => {
+    setLoading(true);
+    setError(null);
+    if (sceneId) {
+      // Single-scene regen — keep existing results visible, just mark this scene loading
+      setRegeneratingSceneId(sceneId);
+    } else {
+      // Full run — wipe everything
+      setSceneResults([]);
+      setRegeneratingSceneId(null);
+      setPhase2Done(false);
+    }
     try {
-      const res = await fetch(`${API}/phase2/run`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+      const res = await fetch(`${API}/phase2/run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scene_id: sceneId }),
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Phase 2 failed');
-      if (data.data?.scenes) {
+      if (sceneId && data.data?.scenes) {
+        setSceneResults(prev => dedupeScenesById([...prev, ...data.data.scenes]));
+      } else if (data.data?.scenes) {
         setSceneResults(dedupeScenesById(data.data.scenes));
-        setPhase2Done(true);
-        setRunNonce((n) => n + 1);
       }
-    } catch (e: any) { setError(e.message || 'An error occurred'); }
-    finally { setLoading(false); }
+      setPhase2Done(true);
+      setRunNonce(n => n + 1);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'An error occurred');
+    } finally {
+      setLoading(false);
+      setRegeneratingSceneId(null);
+    }
   };
 
   const agents = [
@@ -269,7 +327,9 @@ const Phase2 = () => {
         .p2-acc-badge { font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.08em; padding: 3px 10px; border-radius: 4px; }
         .p2-acc-badge--ok { background: rgba(74,158,111,0.12); color: #4a9e6f; border: 1px solid rgba(74,158,111,0.2); }
         .p2-acc-badge--err { background: rgba(208,128,128,0.12); color: #D08080; border: 1px solid rgba(208,128,128,0.2); }
+        .p2-acc-badge--loading { background: rgba(110,158,200,0.12); color: #6e9ec8; border: 1px solid rgba(110,158,200,0.25); animation: pulse 1.5s infinite; }
         .p2-acc-chevron { font-size: 10px; color: #4a4a55; }
+        .p2-regen-loading { padding: 28px 20px; display: flex; align-items: center; justify-content: center; gap: 12px; color: #6e9ec8; font-size: 13px; font-family: 'DM Mono', monospace; letter-spacing: 0.05em; }
 
         /* Accordion body */
         .p2-acc-body { padding: 20px; display: flex; flex-direction: column; gap: 18px; }
@@ -304,7 +364,11 @@ const Phase2 = () => {
       <div className="p2-root">
         {/* Sidebar */}
         <aside className="p2-sidebar">
-          <div className="p2-logo">
+          <div 
+            className="p2-logo" 
+            onClick={() => { if (!loading) navigate('/'); }}
+            style={{ cursor: !loading ? 'pointer' : 'default' }}
+          >
             <div className="p2-logo-eyebrow">Studio Floor</div>
             <div className="p2-logo-title">Montage</div>
           </div>
@@ -376,7 +440,7 @@ const Phase2 = () => {
                   Generate fresh video for each scene from the current Phase 1 script and character designs.
                   Previous runs are not shown automatically — use &quot;Load saved outputs&quot; only if you want files already on disk.
                 </div>
-                <button className="p2-run-btn" onClick={handleRun}>
+                <button className="p2-run-btn" onClick={() => handleRun()}>
                   🎬 Run Phase 2
                 </button>
                 <button
@@ -390,8 +454,8 @@ const Phase2 = () => {
               </div>
             )}
 
-            {/* ── Processing view (replaces all content while loading) ── */}
-            {loading && (() => {
+            {/* ── Full-pipeline processing view (only for whole runs, not single-scene regen) ── */}
+            {loading && !regeneratingSceneId && (() => {
               const steps = [
                 { icon: '🎬', label: 'Video Gen' },
                 { icon: '🎤', label: 'Voice Synth' },
@@ -423,8 +487,8 @@ const Phase2 = () => {
               );
             })()}
 
-            {/* ── Scene accordion (only when done and not reloading) ── */}
-            {phase2Done && !loading && displayScenes.length > 0 && (
+            {/* ── Scene accordion — visible when done, or during single-scene regen ── */}
+            {(phase2Done || regeneratingSceneId !== null) && displayScenes.length > 0 && !(loading && !regeneratingSceneId) && (
               <>
                 <div className="p2-section-hd">
                   <span className="p2-section-num">01</span>
@@ -437,6 +501,8 @@ const Phase2 = () => {
                       result={result}
                       refScene={getRefScene(result.scene_id)}
                       videoNonce={runNonce}
+                      onRegen={(sid) => handleRun(sid)}
+                      isRegenerating={regeneratingSceneId === result.scene_id}
                     />
                   ))}
                 </div>
@@ -450,7 +516,7 @@ const Phase2 = () => {
                   {loading ? 'Production Running...' : '← Back to Phase 1'}
                 </button>
                 {phase2Done && (
-                  <button className="p2-btn-regen" onClick={handleRun} disabled={loading}>
+                  <button className="p2-btn-regen" onClick={() => handleRun()} disabled={loading}>
                     {loading ? 'Running…' : 'Regenerate'}
                   </button>
                 )}

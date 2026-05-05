@@ -10,7 +10,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from shared.schemas.state import MontageState
 from agents.edit_agent.agent import validator_node, hitl_node
 from agents.edit_agent.executor import failure_terminal_node
-from agents.story_agent.agent import scriptwriter_node, character_node, image_node
+from agents.story_agent.agent import scriptwriter_node, character_node, image_node, memory_commit_node
 from agents.orchestrator.state import route_input, route_after_validator, route_after_hitl
 from mcp.tool_registry import registry as mcp_registry
 
@@ -18,13 +18,6 @@ from mcp.tool_registry import registry as mcp_registry
 def mode_selector_node(state: MontageState) -> dict:
     """Initial node to set the start of the process."""
     return {"current_agent": "Supervisor"}
-
-
-def memory_commit_node(state: MontageState) -> dict:
-    """Final node to commit all results to persistent memory via MCP."""
-    print("--- [Memory Commit] Finalizing persistent records ---")
-    mcp_registry.call_tool("commit_memory", key="final_manifest", data=state.get("scenes"))
-    return {"status": "completed"}
 
 
 def montage_workflow():

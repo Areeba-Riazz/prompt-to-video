@@ -14,9 +14,12 @@ logger = logging.getLogger("Phase2Route")
 
 # ── Endpoints for Phase 2 Production ────────────────────────────────────────
 
+class RunRequest(BaseModel):
+    scene_id: int | None = None
+
 @router.post("/run")
-async def run_phase2():
-    """Triggers the full Phase 2 production pipeline."""
+async def run_phase2(req: RunRequest):
+    """Triggers the Phase 2 production pipeline, optionally filtered by scene_id."""
     try:
         # Load character_db from disk to pass into state
         char_db_path = os.path.join("data", "outputs", "phase1", "character_db.json")
@@ -30,7 +33,7 @@ async def run_phase2():
             scene_manifest_path=os.path.join("data", "outputs", "phase1", "scene_manifest.json"),
             output_root=os.path.join("data", "outputs", "phase2"),
             character_db=characters,
-            scene_id_filter=None,
+            scene_id_filter=req.scene_id,
             scenes=[],
             task_graph=[],
             scene_jobs=[],

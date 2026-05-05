@@ -17,6 +17,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("VideoAgent")
+from shared.utils.progress import report_progress
 
 from shared.schemas.phase2_state import StudioState
 from shared.utils.phase2_scene_helpers import scene_reference_portrait
@@ -111,6 +112,7 @@ def video_gen_node(state: StudioState) -> dict:
     for job in jobs:
         scene = job.get("scene", {})
         scene_id = int(job["scene_id"])
+        report_progress("phase2", "Video Gen", "running", f"Generating video footage for Scene {scene_id}...")
         logger.info(f"🎬 [VideoGen] Generating raw footage for Scene {scene_id}...")
         scene_tag = _safe_tag(scene_id)
 
@@ -251,6 +253,7 @@ def face_swap_node(state: StudioState) -> dict:
     for job in jobs:
         scene = job.get("scene", {})
         scene_id = int(job["scene_id"])
+        report_progress("phase2", "Face Swap", "running", f"Swapping faces for Scene {scene_id}...")
         logger.info(f"👤 [FaceSwap] Mapping identity for Scene {scene_id}...")
         scene_tag = _safe_tag(scene_id)
 
@@ -329,6 +332,7 @@ def lip_sync_node(state: StudioState) -> dict:
 
     for job in jobs:
         scene_id = int(job["scene_id"])
+        report_progress("phase2", "Lip Sync", "running", f"Aligning lip sync for Scene {scene_id}...")
         logger.info(f"🔊 [LipSync] Aligning dialogue for Scene {scene_id}...")
         scene_tag = _safe_tag(scene_id)
         audio_item = audio_index.get(scene_id, {})

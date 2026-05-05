@@ -59,31 +59,39 @@ async def run_phase1(req: PromptRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/hitl/approve")
-async def approve_hitl(req: HitlApproveRequest):
+def approve_hitl(req: HitlApproveRequest):
+    """
+    Run as a plain `def` (NOT async) so FastAPI dispatches it to a thread-pool
+    worker. This keeps the event loop free to send WebSocket progress broadcasts
+    while character_node and image_node are executing (which can take minutes).
+    An async def here would freeze the loop and silently drop all WS messages.
+    """
     global CURRENT_THREAD_ID
     try:
         config = {"configurable": {"thread_id": CURRENT_THREAD_ID}}
-        
-        # We update the state indicating if the human approved it
+
+        # Update state with human decision
         graph.update_state(config, {"hitl_approved": req.approved})
-        
-        # Resume graph execution
+
+        # Resume graph execution — blocks this thread, not the event loop
         for _ in graph.stream(None, config=config):
             pass
-            
+
         final_state = graph.get_state(config).values
-        
+
         if final_state.get("status") == "failed":
             raise HTTPException(status_code=400, detail="Pipeline failed or rejected.")
-            
-        # Frontend expects phase1Output structure: { script: {scenes: [...]}, characters: [...] }
+
+        # Frontend expects: { script: {scenes: [...]}, characters: [...] }
         return {
             "data": {
                 "script": {"scenes": final_state.get("scenes", [])},
                 "characters": final_state.get("characters", [])
             }
         }
-        
+
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         traceback.print_exc()

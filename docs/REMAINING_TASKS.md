@@ -11,9 +11,9 @@ This document outlines the remaining work required to fulfill the submission req
 *   [ ] **Background Music (BGM):** Integrate background music selection or generation per scene mood (as per Phase 2 requirements).
 
 ### Phase 4 — Web Interface & Orchestration
-*   [ ] **Real-time Progress:** Implement WebSockets or Server-Sent Events (SSE) to show phase-level progress (e.g., "Synthesizing Audio...", "Generating Video...") in the UI.
-*   [ ] **Phase-Level Re-runs:** Add UI buttons to regenerate specific components (e.g., "Regenerate Voice only" for a specific scene) without re-running the entire pipeline.
-*   [ ] **Unified Dashboard:** Create a landing page or dashboard that orchestrates the entire flow from initial prompt to final movie download.
+*   [x] **Real-time Progress:** Implement WebSockets or Server-Sent Events (SSE) to show phase-level progress.
+*   [x] **Phase-Level Re-runs:** Add UI buttons to regenerate specific components without re-running the entire pipeline.
+*   [x] **Unified Dashboard:** Create a landing page or dashboard that orchestrates the entire flow.
 
 ### Phase 5 — Intelligent Edit & Undo System
 *   [ ] **Intent Classification Agent:** Replace the current placeholder in `agents/edit_agent/intent_classifier.py` with a real LLM agent that parses natural language edits (e.g., "Make the scene darker").
@@ -53,8 +53,8 @@ This document outlines the remaining work required to fulfill the submission req
 ---
 
 ## 📅 Deadline Checklist
-- [ ] Codebase structured and modular.
-- [ ] Root `README.md` updated with setup instructions.
+- [x] Codebase structured and modular.
+- [x] Root `README.md` updated with setup instructions.
 - [ ] All 5 phases functional and integrated.
-- [ ] Requirements.txt complete.
-- [ ] Public/Shared GitHub Repo link ready.
+- [x] Requirements.txt complete.
+- [x] Public/Shared GitHub Repo link ready.

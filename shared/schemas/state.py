@@ -13,6 +13,7 @@ class Character(BaseModel):
     appearance: str
     voice_profile: str
     reference_style: str
+    gender: Optional[str] = None   # "male" | "female" | "neutral" — inferred by LLM
     image_path: Optional[str] = None
 
 class MontageState(TypedDict):

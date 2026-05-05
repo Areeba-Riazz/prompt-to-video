@@ -14,6 +14,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("VoiceSynth")
+from shared.utils.progress import report_progress
 
 
 def _infer_emotion(line: str, visual_cue: Optional[str]) -> str:
@@ -202,6 +203,7 @@ def voice_synth_node(state: StudioState) -> dict:
     for job in jobs:
         scene = job.get("scene", {})
         scene_id = int(job["scene_id"])
+        report_progress("phase2", "Voice Synth", "running", f"Synthesizing audio for Scene {scene_id}...")
         logger.info(f"🎤 [VoiceSynth] Synthesizing audio for Scene {scene_id}...")
         scene_tag = _safe_tag(scene_id)
         dialogue_lines = scene.get("dialogue", [])
@@ -212,7 +214,7 @@ def voice_synth_node(state: StudioState) -> dict:
 
         for i, line in enumerate(dialogue_lines):
             speaker = line.get("speaker", "A")
-            text = line.get("line", "")
+            text = line.get("line") or ""
             emotion = line.get("emotion") or _infer_emotion(
                 line.get("line", ""),
                 line.get("visual_cue"),
