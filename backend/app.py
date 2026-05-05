@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.routes.phase1 import router as phase1_router
 from backend.routes.phase2 import router as phase2_router
+from backend.routes.phase5 import router as phase5_router
 from backend.websocket.manager import progress_manager
 from fastapi import WebSocket, WebSocketDisconnect
 
@@ -52,6 +53,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
 app.include_router(phase1_router, prefix="/api/phase1", tags=["Phase 1"])
 app.include_router(phase2_router, prefix="/api/phase2", tags=["Phase 2"])
+app.include_router(phase5_router, prefix="/api/phase5", tags=["Phase 5"])
 
 if __name__ == "__main__":
     import uvicorn

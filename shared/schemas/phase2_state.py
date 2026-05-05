@@ -1,4 +1,4 @@
-from typing import Annotated, Any, Dict, List, TypedDict
+from typing import Annotated, Any, Dict, List, TypedDict, Optional
 import operator
 
 
@@ -9,7 +9,10 @@ class StudioState(TypedDict):
 
     # Phase 1 data passed in at startup
     character_db: List[Dict[str, Any]]  # list of character dicts from character_db.json
-    scene_id_filter: int
+    scene_id_filter: Optional[int]
+    skip_video: bool  # New flag for targeted audio edits
+    skip_all_gen: bool # New flag for post-proc only runs
+    post_proc_map: Dict[str, Any] # Map of scope -> FX parameters
 
     # Parsed/Planning
     scenes: List[Dict[str, Any]]

@@ -70,6 +70,9 @@ def scene_parser_node(state: StudioState) -> dict:
     }
 
 
+from agents.post_proc_agent.agent import post_proc_node
+
+
 def failure_terminal_node(state: StudioState) -> StudioState:
     """Absorbs pipeline failures gracefully."""
     errors = state.get("errors", [])
@@ -108,6 +111,7 @@ def studio_floor_workflow():
     workflow.add_node("Video_gen_node", video_gen_node)
     workflow.add_node("Face_swap_node", face_swap_node)
     workflow.add_node("Lip_sync_node", lip_sync_node)
+    workflow.add_node("Post_proc_node", post_proc_node)
     workflow.add_node("Memory_commit_node", memory_commit_node)
     workflow.add_node("Failure_terminal_node", failure_terminal_node)
 
@@ -116,7 +120,11 @@ def studio_floor_workflow():
     workflow.add_conditional_edges(
         "Scene_parser_node",
         route_after_parse,
-        {"voice": "Voice_synth_node", "end": "Failure_terminal_node"},
+        {
+            "voice": "Voice_synth_node", 
+            "post_proc": "Post_proc_node",
+            "end": "Failure_terminal_node"
+        },
     )
     workflow.add_conditional_edges(
         "Voice_synth_node",
@@ -125,7 +133,8 @@ def studio_floor_workflow():
     )
     workflow.add_edge("Video_gen_node", "Face_swap_node")
     workflow.add_edge("Face_swap_node", "Lip_sync_node")
-    workflow.add_edge("Lip_sync_node", "Memory_commit_node")
+    workflow.add_edge("Lip_sync_node", "Post_proc_node")
+    workflow.add_edge("Post_proc_node", "Memory_commit_node")
     workflow.add_edge("Memory_commit_node", END)
     workflow.add_edge("Failure_terminal_node", END)
 

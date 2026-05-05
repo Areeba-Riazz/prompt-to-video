@@ -14,6 +14,7 @@ def route_video_branches(state: StudioState):
     """
     Phase 2 parallel fan-out using LangGraph Send() API.
     One Send per scene_job → each runs video_gen independently.
+    If skip_video is True, we skip Video_gen_node and go straight to Face_swap_node.
     """
     from langgraph.types import Send
 
@@ -21,17 +22,24 @@ def route_video_branches(state: StudioState):
     if not jobs:
         return [Send("Face_swap_node", state)]
 
-    print(f"[Graph] Distributing {len(jobs)} scene(s) in parallel for video generation…")
+    skip = state.get("skip_video", False)
+    target_node = "Face_swap_node" if skip else "Video_gen_node"
+
+    if skip:
+        print(f"[Graph] skip_video=True: Bypassing video generation, going straight to {target_node}")
+
     return [
-        Send("Video_gen_node", {**state, "scene_jobs": [job]})
+        Send(target_node, {**state, "scene_jobs": [job]})
         for job in jobs
     ]
 
 
 def route_after_parse(state: StudioState) -> str:
-    """Route to parallel voice+video processing or to failure terminal."""
+    """Route to parallel voice+video processing, post-proc only, or to failure terminal."""
     if state.get("status") == "failed":
         return "end"
+    if state.get("skip_all_gen"):
+        return "post_proc"
     return "voice"
 
 

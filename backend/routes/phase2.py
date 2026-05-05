@@ -4,6 +4,7 @@ from pydantic import BaseModel
 import os
 import json
 import logging
+from typing import Dict, Any, Optional
 
 from agents.orchestrator.graph_phase2 import studio_floor_workflow
 from shared.schemas.phase2_state import StudioState
@@ -17,25 +18,48 @@ logger = logging.getLogger("Phase2Route")
 OUTPUT_ROOT = os.path.join("data", "outputs", "phase2")
 
 
-def _build_initial_state(scene_id: int | None = None) -> StudioState:
+def _build_initial_state(
+    scene_id: int | None = None, 
+    skip_video: bool = False,
+    post_proc_map: Dict[str, Any] = {}
+) -> StudioState:
     """Construct a clean StudioState for a new pipeline run."""
     char_db_path = os.path.join("data", "outputs", "phase1", "character_db.json")
     characters = []
     if os.path.exists(char_db_path):
-        with open(char_db_path, "r") as f:
+        with open(char_db_path, "r", encoding="utf-8") as f:
             cdata = json.load(f)
             characters = cdata.get("characters", []) if isinstance(cdata, dict) else cdata
 
+    video_tracks = []
+    if skip_video:
+        # Pre-populate video tracks from existing final_scenes to allow passthrough
+        final_dir = os.path.join(OUTPUT_ROOT, "final_scenes")
+        if os.path.exists(final_dir):
+            for entry in os.listdir(final_dir):
+                if entry.startswith("scene_") and entry.endswith(".mp4"):
+                    try:
+                        sid = int(entry.replace("scene_", "").replace(".mp4", ""))
+                        if scene_id is None or sid == scene_id:
+                            video_tracks.append({
+                                "scene_id": sid,
+                                "video_path": os.path.join(final_dir, entry),
+                                "method": "existing"
+                            })
+                    except: continue
+
     return StudioState(
-        scene_manifest_path=os.path.join("data", "outputs", "phase1", "scene_manifest.json"),
+        scene_manifest_path=os.path.join("data/outputs/phase1/scene_manifest.json"),
         output_root=OUTPUT_ROOT,
         character_db=characters,
         scene_id_filter=scene_id,
+        skip_video=skip_video,
+        post_proc_map=post_proc_map,
         scenes=[],
         task_graph=[],
         scene_jobs=[],
         audio_tracks=[],
-        video_tracks=[],
+        video_tracks=video_tracks,
         face_swaps=[],
         final_scenes=[],
         final_output_path="",
@@ -48,13 +72,19 @@ def _build_initial_state(scene_id: int | None = None) -> StudioState:
 
 class RunRequest(BaseModel):
     scene_id: int | None = None
+    skip_video: bool = False
+    post_proc_map: Dict[str, Any] = {}
 
 
 @router.post("/run")
 async def run_phase2(req: RunRequest):
     """Triggers the Phase 2 production pipeline, optionally filtered by scene_id."""
     try:
-        initial_state = _build_initial_state(scene_id=req.scene_id)
+        initial_state = _build_initial_state(
+            scene_id=req.scene_id, 
+            skip_video=req.skip_video,
+            post_proc_map=req.post_proc_map
+        )
 
         logger.info("🎬 Starting Phase 2 Studio Floor production...")
         final_state = graph.invoke(initial_state)

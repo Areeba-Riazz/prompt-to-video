@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import HITLModal from './HITLModal';
 import { useProgress } from '../hooks/useProgress';
+import { EditPanel } from '../components/EditPanel';
 
 const Phase1 = () => {
   const navigate = useNavigate();
@@ -15,6 +16,8 @@ const Phase1 = () => {
   const [phase1Output, setPhase1Output] = useState<any>(null);
   const [hitlPending, setHitlPending] = useState(false);
   const [pendingScript, setPendingScript] = useState<any>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [editPanelOpen, setEditPanelOpen] = useState(false);
 
   useEffect(() => {
     if (progress?.phase === 'phase1') {
@@ -107,7 +110,20 @@ const Phase1 = () => {
         .pm-root { display: flex; min-height: 100vh; background: #0a0a0b; color: #e8e0d0; font-family: 'DM Sans', sans-serif; font-size: 14px; }
 
         /* SIDEBAR */
-        .pm-sidebar { width: 240px; min-width: 240px; position: fixed; top: 0; left: 0; bottom: 0; background: #111113; border-right: 1px solid #1e1e22; display: flex; flex-direction: column; padding: 28px 0 24px; z-index: 100; }
+        .pm-sidebar { width: 240px; min-width: 240px; position: fixed; top: 0; left: 0; bottom: 0; background: #111113; border-right: 1px solid #1e1e22; display: flex; flex-direction: column; padding: 28px 0 24px; z-index: 100; transition: transform 0.3s ease, width 0.3s ease; }
+        .pm-sidebar--collapsed { width: 64px; min-width: 64px; }
+        .pm-sidebar--collapsed .pm-logo-title, 
+        .pm-sidebar--collapsed .pm-logo-eyebrow,
+        .pm-sidebar--collapsed .pm-nav-section-label,
+        .pm-sidebar--collapsed .pm-agent-name,
+        .pm-sidebar--collapsed .pm-mem-block,
+        .pm-sidebar--collapsed .pm-sidebar-footer { display: none; }
+        .pm-sidebar--collapsed .pm-logo { padding: 0; display: flex; justify-content: center; border-bottom: none; }
+        .pm-sidebar--collapsed .pm-agent-row { justify-content: center; padding: 12px 0; }
+        
+        .pm-sidebar-toggle { position: absolute; top: 20px; right: -12px; width: 24px; height: 24px; border-radius: 50%; background: #1e1e22; border: 1px solid #2a2a30; color: #c8a96e; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 10px; z-index: 110; transition: all 0.2s; }
+        .pm-sidebar-toggle:hover { background: #c8a96e; color: #0a0a0b; }
+
         .pm-logo { padding: 0 24px 28px; border-bottom: 1px solid #1e1e22; }
         .pm-logo-eyebrow { font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.2em; text-transform: uppercase; color: #c8a96e; margin-bottom: 4px; }
         .pm-logo-title { font-family: 'Playfair Display', serif; font-size: 20px; font-weight: 700; color: #f0e8d8; letter-spacing: -0.02em; }
@@ -127,7 +143,9 @@ const Phase1 = () => {
         .pm-sidebar-footer { margin-top: auto; padding: 16px 24px 0; border-top: 1px solid #1e1e22; font-size: 10px; color: #3a3a44; font-family: 'DM Mono', monospace; letter-spacing: 0.05em; }
 
         /* MAIN */
-        .pm-main { margin-left: 240px; flex: 1; display: flex; flex-direction: column; min-height: 100vh; }
+        .pm-main { margin-left: 240px; flex: 1; display: flex; flex-direction: column; min-height: 100vh; transition: margin-left 0.3s ease, margin-right 0.3s ease; }
+        .pm-main--expanded { margin-left: 64px; }
+        .pm-main--edit-open { margin-right: 360px; }
         .pm-topbar { position: sticky; top: 0; z-index: 50; background: rgba(10,10,11,0.92); backdrop-filter: blur(8px); border-bottom: 1px solid #1e1e22; padding: 0 40px; height: 52px; display: flex; align-items: center; justify-content: space-between; }
         .pm-breadcrumb { font-family: 'DM Mono', monospace; font-size: 11px; color: #4a4a55; display: flex; align-items: center; gap: 8px; }
         .pm-breadcrumb span { color: #c8a96e; }
@@ -268,7 +286,14 @@ const Phase1 = () => {
       )}
 
       <div className="pm-root">
-        <aside className="pm-sidebar">
+        <aside className={`pm-sidebar ${sidebarCollapsed ? 'pm-sidebar--collapsed' : ''}`}>
+          <button 
+            className="pm-sidebar-toggle" 
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            title={sidebarCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
+          >
+            {sidebarCollapsed ? '→' : '←'}
+          </button>
           <div 
             className="pm-logo" 
             onClick={() => { if (!isProcessing && !isApproving) navigate('/'); }}
@@ -294,7 +319,7 @@ const Phase1 = () => {
           <div className="pm-sidebar-footer">CS-4015 Agentic AI · FAST NUCES</div>
         </aside>
 
-        <main className="pm-main">
+        <main className={`pm-main ${sidebarCollapsed ? 'pm-main--expanded' : ''} ${editPanelOpen ? 'pm-main--edit-open' : ''}`}>
           <div className="pm-topbar">
             <div className="pm-breadcrumb">Montage <span>/</span> Phase 1 — Writers' Room</div>
             <div className="pm-phase-badge">Phase 1 of 2</div>
@@ -468,6 +493,25 @@ const Phase1 = () => {
             )}
           </div>
         </main>
+
+        {/* Phase 5: Intelligent Edit Agent */}
+        {phase1Output && (
+          <EditPanel 
+            currentState={{
+              scenes: phase1Output.script?.scenes,
+              characters: phase1Output.characters,
+              final_scenes: [], 
+              scene_manifest_path: "data/outputs/phase1/scene_manifest.json"
+            }} 
+            onStateUpdate={(newState: any) => {
+              if (newState.script) {
+                setPhase1Output((prev: any) => ({ ...prev, script: newState.script }));
+              }
+            }} 
+            isOpen={editPanelOpen}
+            setIsOpen={setEditPanelOpen}
+          />
+        )}
       </div>
     </>
   );

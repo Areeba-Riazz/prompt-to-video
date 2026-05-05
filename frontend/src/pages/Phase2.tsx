@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useProgress } from '../hooks/useProgress';
+import { EditPanel } from '../components/EditPanel';
 
 interface Phase2SceneResult {
   scene_id: number;
@@ -142,6 +143,8 @@ const Phase2 = () => {
   const [compositeResult, setCompositeResult] = useState<{ size_mb: number; transition: string; bgm_enabled: boolean; subtitles_enabled: boolean } | null>(null);
   const [compositeError, setCompositeError] = useState<string | null>(null);
   const [finalVideoNonce, setFinalVideoNonce] = useState(0);
+  const [isAudioOnlyRun, setIsAudioOnlyRun] = useState(false);
+  const [isPostProcOnlyRun, setIsPostProcOnlyRun] = useState(false);
 
   const loadRef = useCallback(async () => {
     try {
@@ -152,6 +155,8 @@ const Phase2 = () => {
   }, []);
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [editPanelOpen, setEditPanelOpen] = useState(false);
   /** Bumps when a run finishes so `<video>` URLs don't stick to cached prior responses in the browser. */
   const [runNonce, setRunNonce] = useState(0);
   /** Which single scene is currently being regenerated (null = full run). */
@@ -200,9 +205,12 @@ const Phase2 = () => {
     }
   };
 
-  const handleRun = async (sceneId: number | null = null) => {
+  const handleRun = async (sceneId: number | null = null, skipVideo: boolean = false, skipAllGen: boolean = false, postProcMap: any = {}) => {
+    console.log(`[Phase2] handleRun: sceneId=${sceneId}, skipVideo=${skipVideo}, skipAllGen=${skipAllGen}`);
     setLoading(true);
     setError(null);
+    setIsAudioOnlyRun(skipVideo);
+    setIsPostProcOnlyRun(skipAllGen);
     if (sceneId) {
       // Single-scene regen — keep existing results visible, just mark this scene loading
       setRegeneratingSceneId(sceneId);
@@ -216,7 +224,12 @@ const Phase2 = () => {
       const res = await fetch(`${API}/phase2/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scene_id: sceneId }),
+        body: JSON.stringify({ 
+          scene_id: sceneId, 
+          skip_video: skipVideo,
+          skip_all_gen: skipAllGen,
+          post_proc_map: postProcMap
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Phase 2 failed');
@@ -232,6 +245,35 @@ const Phase2 = () => {
     } finally {
       setLoading(false);
       setRegeneratingSceneId(null);
+    }
+  };
+
+  const onEditUpdate = (newState: any, nextStep?: string, sceneId?: number) => {
+    // 1. Update local results
+    if (newState.final_scenes) {
+      setSceneResults(dedupeScenesById(newState.final_scenes));
+    } else if (newState.audio_tracks) {
+      // If it's a StudioState update
+      setSceneResults(prev => dedupeScenesById([...prev])); 
+    }
+    
+    // 2. Refresh assets (cache busting)
+    setRunNonce(n => n + 1);
+    setFinalVideoNonce(n => n + 1);
+    setPhase2Done(true);
+
+    // 3. Trigger targeted re-run if requested by Edit Agent
+    if (nextStep === 'phase2_partial') {
+      handleRun(
+        sceneId || null, 
+        newState.skip_video || false, 
+        newState.skip_all_gen || false,
+        newState.post_proc_map || {}
+      );
+    } else if (nextStep === 'phase1_full') {
+      // If script changed, we might need to reload ref script
+      loadRef();
+      handleRun(); // Full re-run
     }
   };
 
@@ -261,15 +303,23 @@ const Phase2 = () => {
         .p2-script-side-title { font-family: 'Playfair Display', serif; font-size: 18px; font-weight: 600; color: #f0e8d8; }
         .p2-script-side-close { background: none; border: none; color: #4a4a55; cursor: pointer; font-size: 18px; }
         .p2-script-side-body { flex: 1; overflow-y: auto; padding: 24px; }
-        .p2-script-side-scene { margin-bottom: 24px; }
-        .p2-side-scene-id { font-family: 'DM Mono', monospace; font-size: 10px; color: #6e9ec8; margin-bottom: 4px; }
-        .p2-side-scene-loc { font-size: 12px; color: #b0a898; font-weight: 600; margin-bottom: 8px; }
-
-        .p2-script-toggle { position: fixed; right: 24px; bottom: 24px; width: 56px; height: 56px; border-radius: 50%; background: #6e9ec8; color: #fff; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 20px; z-index: 900; box-shadow: 0 4px 15px rgba(110,158,200,0.4); transition: transform 0.2s; }
+               .p2-script-toggle { position: fixed; right: 24px; bottom: 24px; width: 56px; height: 56px; border-radius: 50%; background: #6e9ec8; color: #fff; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 20px; z-index: 900; box-shadow: 0 4px 15px rgba(110,158,200,0.4); transition: transform 0.2s; }
         .p2-script-toggle:hover { transform: scale(1.05); }
 
         /* Sidebar Left */
-        .p2-sidebar { width: 240px; min-width: 240px; position: fixed; top: 0; left: 0; bottom: 0; background: #111113; border-right: 1px solid #1e1e22; display: flex; flex-direction: column; padding: 28px 0 24px; z-index: 100; }
+        .p2-sidebar { width: 240px; min-width: 240px; position: fixed; top: 0; left: 0; bottom: 0; background: #111113; border-right: 1px solid #1e1e22; display: flex; flex-direction: column; padding: 28px 0 24px; z-index: 100; transition: transform 0.3s ease, width 0.3s ease; }
+        .p2-sidebar--collapsed { width: 64px; min-width: 64px; }
+        .p2-sidebar--collapsed .p2-logo-title, 
+        .p2-sidebar--collapsed .p2-logo-eyebrow,
+        .p2-sidebar--collapsed .p2-sec-lbl,
+        .p2-sidebar--collapsed .p2-agent-name,
+        .p2-sidebar--collapsed .p2-sidebar-footer { display: none; }
+        .p2-sidebar--collapsed .p2-logo { padding: 0; display: flex; justify-content: center; border-bottom: none; }
+        .p2-sidebar--collapsed .p2-agent-row { justify-content: center; padding: 12px 0; }
+        
+        .p2-sidebar-toggle { position: absolute; top: 20px; right: -12px; width: 24px; height: 24px; border-radius: 50%; background: #1e1e22; border: 1px solid #2a2a30; color: #6e9ec8; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 10px; z-index: 110; transition: all 0.2s; }
+        .p2-sidebar-toggle:hover { background: #6e9ec8; color: #fff; }
+
         .p2-logo { padding: 0 24px 28px; border-bottom: 1px solid #1e1e22; }
         .p2-logo-eyebrow { font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.2em; text-transform: uppercase; color: #6e9ec8; margin-bottom: 4px; }
         .p2-logo-title { font-family: 'Playfair Display', serif; font-size: 20px; font-weight: 700; color: #f0e8d8; }
@@ -283,6 +333,12 @@ const Phase2 = () => {
         .p2-agent-dot.running { background: #6e9ec8; animation: pulse 2s infinite; }
         .p2-agent-dot.done { background: #4a9e6f; }
         .p2-sidebar-footer { margin-top: auto; padding: 16px 24px 0; border-top: 1px solid #1e1e22; font-size: 10px; color: #3a3a44; font-family: 'DM Mono', monospace; }
+ 
+        /* Main */
+        .p2-main { margin-left: 240px; flex: 1; display: flex; flex-direction: column; transition: margin-left 0.3s ease, margin-right 0.3s ease; }
+        .p2-main--expanded { margin-left: 64px; }
+        .p2-main--edit-open { margin-right: 360px; }
+2-sidebar-footer { margin-top: auto; padding: 16px 24px 0; border-top: 1px solid #1e1e22; font-size: 10px; color: #3a3a44; font-family: 'DM Mono', monospace; }
 
         /* Main */
         .p2-main { margin-left: 240px; flex: 1; display: flex; flex-direction: column; }
@@ -396,7 +452,14 @@ const Phase2 = () => {
 
       <div className="p2-root">
         {/* Sidebar */}
-        <aside className="p2-sidebar">
+        <aside className={`p2-sidebar ${sidebarCollapsed ? 'p2-sidebar--collapsed' : ''}`}>
+          <button 
+            className="p2-sidebar-toggle" 
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            title={sidebarCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
+          >
+            {sidebarCollapsed ? '→' : '←'}
+          </button>
           <div 
             className="p2-logo" 
             onClick={() => { if (!loading) navigate('/'); }}
@@ -446,7 +509,8 @@ const Phase2 = () => {
         </button>
 
         {/* Main */}
-        <main className="p2-main">
+        {/* Main */}
+        <main className={`p2-main ${sidebarCollapsed ? 'p2-main--expanded' : ''} ${editPanelOpen ? 'p2-main--edit-open' : ''}`}>
           <div className="p2-topbar">
             <div className="p2-breadcrumb">Montage <span>/</span> Phase 2 — Studio Floor</div>
             <div className="p2-phase-badge">Phase 2 of 2</div>
@@ -489,12 +553,19 @@ const Phase2 = () => {
 
             {/* ── Full-pipeline processing view (only for whole runs, not single-scene regen) ── */}
             {loading && !regeneratingSceneId && (() => {
-              const steps = [
-                { icon: '🎬', label: 'Video Gen' },
-                { icon: '🎤', label: 'Voice Synth' },
-                { icon: '👤', label: 'Face Swap' },
-                { icon: '🔊', label: 'Lip Sync' },
+              const allSteps = [
+                { icon: '🎬', label: 'Video Gen', key: 'video' },
+                { icon: '🎤', label: 'Voice Synth', key: 'voice' },
+                { icon: '👤', label: 'Face Swap', key: 'face' },
+                { icon: '🔊', label: 'Lip Sync', key: 'lip' },
+                { icon: '🎨', label: 'Post-Processing', key: 'post_proc' },
               ];
+              const steps = isPostProcOnlyRun
+                ? allSteps.filter(s => s.key === 'post_proc')
+                : isAudioOnlyRun 
+                ? allSteps.filter(s => s.key !== 'video')
+                : allSteps;
+                
               return (
                 <div className="p2-gen-box">
                   <div className="p2-gen-title">
@@ -607,8 +678,24 @@ const Phase2 = () => {
                 )}
               </div>
             </div>
-          </div>
-        </main>
+            </div>
+          </main>
+
+          {/* Phase 5: Intelligent Edit Agent */}
+        {(phase2Done || displayScenes.length > 0) && (
+          <EditPanel 
+            currentState={{
+              scenes: refScript?.scenes,
+              characters: refChars,
+              final_scenes: displayScenes,
+              audio_tracks: [],
+              scene_manifest_path: "data/outputs/phase1/scene_manifest.json"
+            }} 
+            onStateUpdate={onEditUpdate} 
+            isOpen={editPanelOpen}
+            setIsOpen={setEditPanelOpen}
+          />
+        )}
       </div>
     </>
   );

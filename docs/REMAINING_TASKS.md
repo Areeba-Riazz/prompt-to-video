@@ -16,10 +16,10 @@ This document outlines the remaining work required to fulfill the submission req
 *   [x] **Unified Dashboard:** Create a landing page or dashboard that orchestrates the entire flow.
 
 ### Phase 5 — Intelligent Edit & Undo System
-*   [ ] **Intent Classification Agent:** Replace the current placeholder in `agents/edit_agent/intent_classifier.py` with a real LLM agent that parses natural language edits (e.g., "Make the scene darker").
-*   [ ] **State Snapshot System:** Implement the `state_manager` logic to save JSON state and assets at every step (currently 0-byte files).
-*   [ ] **Undo/Revert Logic:** Build the `revert(version)` functionality to restore previous snapshots.
-*   [ ] **Version History UI:** Add a "History" panel in the frontend to display previous versions and allow one-click reverts.
+*   [x] **Intent Classification Agent:** Replaced placeholder with a real LLM agent that parses natural language edits.
+*   [x] **State Snapshot System:** Implemented `state_manager/snapshot.py` to save JSON state and assets at every step.
+*   [x] **Undo/Revert Logic:** Built the `revert(version)` functionality to restore previous snapshots.
+*   [x] **Version History UI:** Added a "History" panel in the frontend to display previous versions and allow one-click reverts.
 
 ---
 
