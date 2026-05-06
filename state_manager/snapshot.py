@@ -85,6 +85,55 @@ class StateManager:
             return json.load(f)
 
     @staticmethod
+    def truncate_future_after_version(branch_version: str) -> int:
+        """
+        Remove every snapshot strictly after ``branch_version`` in chronological
+        (append) order — i.e. discard the redo branch when a new edit is saved
+        from a past version.
+
+        Returns the number of removed snapshot entries.
+        """
+        StateManager._ensure_dir()
+        if not os.path.exists(HISTORY_FILE):
+            return 0
+        with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+            history: List[Dict[str, Any]] = json.load(f)
+        if not isinstance(history, list):
+            return 0
+        idx = next(
+            (i for i, h in enumerate(history) if h.get("version") == branch_version),
+            None,
+        )
+        if idx is None:
+            logger.warning(
+                "truncate_future_after_version: %r not in history; skipping",
+                branch_version,
+            )
+            return 0
+        tail = history[idx + 1 :]
+        if not tail:
+            return 0
+        for h in tail:
+            ver = h.get("version") or ""
+            if not ver:
+                continue
+            v_dir = os.path.join(SNAPSHOT_DIR, ver)
+            if os.path.isdir(v_dir):
+                try:
+                    shutil.rmtree(v_dir)
+                except OSError as e:
+                    logger.error("Could not remove snapshot dir %s: %s", v_dir, e)
+        history = history[: idx + 1]
+        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(history, f, indent=2)
+        logger.info(
+            "Truncated %d snapshot(s) after branch %r",
+            len(tail),
+            branch_version,
+        )
+        return len(tail)
+
+    @staticmethod
     def revert(version: str) -> Dict[str, Any]:
         """
         Restores state and assets from a previous snapshot.

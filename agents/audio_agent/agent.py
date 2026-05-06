@@ -256,6 +256,11 @@ def voice_synth_node(state: StudioState) -> dict:
                 else:
                     logger.info(f"🗣️ [VoiceSynth] Synthesizing speech: {seg['val'][:30]}...")
                     try:
+                        try:
+                            _ehz = char_info.get("edge_pitch_offset_hz")
+                            edge_pitch_hz = int(_ehz) if _ehz is not None else 0
+                        except (TypeError, ValueError):
+                            edge_pitch_hz = 0
                         registry.invoke("voice_cloning_synthesizer", {
                             "character_name": speaker,
                             "dialogue": seg["val"],
@@ -266,6 +271,7 @@ def voice_synth_node(state: StudioState) -> dict:
                             "edge_voice": char_info.get("edge_voice"),
                             "tts_voice": char_info.get("tts_voice"),
                             "kokoro_voice": char_info.get("kokoro_voice"),
+                            "edge_pitch_offset_hz": edge_pitch_hz,
                         })
                         if os.path.exists(seg_path):
                             line_segments.append(seg_path)

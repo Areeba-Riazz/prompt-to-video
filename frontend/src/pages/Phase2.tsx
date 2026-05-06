@@ -205,7 +205,13 @@ const Phase2 = () => {
     }
   };
 
-  const handleRun = async (sceneId: number | null = null, skipVideo: boolean = false, skipAllGen: boolean = false, postProcMap: any = {}) => {
+  const handleRun = async (
+    sceneId: number | null = null,
+    skipVideo: boolean = false,
+    skipAllGen: boolean = false,
+    postProcMap: Record<string, unknown> = {},
+    characterDb?: Character[] | null,
+  ) => {
     console.log(`[Phase2] handleRun: sceneId=${sceneId}, skipVideo=${skipVideo}, skipAllGen=${skipAllGen}`);
     setLoading(true);
     setError(null);
@@ -221,15 +227,19 @@ const Phase2 = () => {
       setPhase2Done(false);
     }
     try {
+      const body: Record<string, unknown> = {
+        scene_id: sceneId,
+        skip_video: skipVideo,
+        skip_all_gen: skipAllGen,
+        post_proc_map: postProcMap,
+      };
+      if (characterDb != null && Array.isArray(characterDb) && characterDb.length > 0) {
+        body.character_db = characterDb;
+      }
       const res = await fetch(`${API}/phase2/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          scene_id: sceneId, 
-          skip_video: skipVideo,
-          skip_all_gen: skipAllGen,
-          post_proc_map: postProcMap
-        }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Phase 2 failed');
@@ -264,11 +274,13 @@ const Phase2 = () => {
 
     // 3. Trigger targeted re-run if requested by Edit Agent
     if (nextStep === 'phase2_partial') {
+      void loadRef();
       handleRun(
-        sceneId || null, 
-        newState.skip_video || false, 
+        sceneId || null,
+        newState.skip_video || false,
         newState.skip_all_gen || false,
-        newState.post_proc_map || {}
+        newState.post_proc_map || {},
+        newState.character_db ?? newState.characters ?? null,
       );
     } else if (nextStep === 'phase1_full') {
       // If script changed, we might need to reload ref script
@@ -685,8 +697,9 @@ const Phase2 = () => {
         {(phase2Done || displayScenes.length > 0) && (
           <EditPanel 
             currentState={{
-              scenes: refScript?.scenes,
+              scenes: refScript?.scenes ?? [],
               characters: refChars,
+              character_db: refChars,
               final_scenes: displayScenes,
               audio_tracks: [],
               scene_manifest_path: "data/outputs/phase1/scene_manifest.json"

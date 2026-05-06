@@ -38,6 +38,10 @@ JSON SCHEMA:
   "explanation": "Brief reasoning for this classification"
 }
 
+ROUTING RULES:
+- Deeper/higher pitch on existing dialogue without changing words: prefer "audio_fx" + parameters.pitch (0.5–1.0 = deeper, 1.0+ = higher), scope "character:{Name}" if a name is given, else "global".
+- Changing voice identity (gender, accent, different neural voice) or re-synthesizing after script tweaks: use "audio" + scope "character:{Name}"; include parameters.pitch when the user mentions deeper/higher so TTS prosody updates on regeneration.
+
 EXAMPLES:
 - "Make Alex's voice deeper" -> {"intent": "pitch_shift", "target": "audio_fx", "scope": "character:Alex", "parameters": {"pitch": 0.8}}
 - "Make his voice sound like it's over a radio" -> {"intent": "apply_filter", "target": "audio_fx", "scope": "character:Alex", "parameters": {"filter_type": "radio"}}

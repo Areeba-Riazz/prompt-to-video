@@ -4,9 +4,10 @@ from pydantic import BaseModel
 import os
 import json
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 from agents.orchestrator.graph_phase2 import studio_floor_workflow
+from agents.edit_agent import edit_execution as edit_ex
 from shared.schemas.phase2_state import StudioState
 
 router = APIRouter()
@@ -19,19 +20,26 @@ OUTPUT_ROOT = os.path.join("data", "outputs", "phase2")
 
 
 def _build_initial_state(
-    scene_id: int | None = None, 
+    scene_id: int | None = None,
     skip_video: bool = False,
-    post_proc_map: Dict[str, Any] = {}
+    skip_all_gen: bool = False,
+    post_proc_map: Optional[Dict[str, Any]] = None,
+    character_db: Optional[List[Dict[str, Any]]] = None,
 ) -> StudioState:
     """Construct a clean StudioState for a new pipeline run."""
-    char_db_path = os.path.join("data", "outputs", "phase1", "character_db.json")
-    characters = []
-    if os.path.exists(char_db_path):
+    if post_proc_map is None:
+        post_proc_map = {}
+
+    char_db_path = os.path.join(edit_ex.phase1_dir(), "character_db.json")
+    characters: List[Dict[str, Any]] = []
+    if isinstance(character_db, list):
+        characters = list(character_db)
+    elif os.path.exists(char_db_path):
         with open(char_db_path, "r", encoding="utf-8") as f:
             cdata = json.load(f)
             characters = cdata.get("characters", []) if isinstance(cdata, dict) else cdata
 
-    video_tracks = []
+    video_tracks: List[Dict[str, Any]] = []
     if skip_video:
         # Pre-populate video tracks from existing final_scenes to allow passthrough
         final_dir = os.path.join(OUTPUT_ROOT, "final_scenes")
@@ -46,14 +54,16 @@ def _build_initial_state(
                                 "video_path": os.path.join(final_dir, entry),
                                 "method": "existing"
                             })
-                    except: continue
+                    except Exception:
+                        continue
 
     return StudioState(
-        scene_manifest_path=os.path.join("data/outputs/phase1/scene_manifest.json"),
+        scene_manifest_path=os.path.join(edit_ex.phase1_dir(), "scene_manifest.json"),
         output_root=OUTPUT_ROOT,
         character_db=characters,
         scene_id_filter=scene_id,
         skip_video=skip_video,
+        skip_all_gen=skip_all_gen,
         post_proc_map=post_proc_map,
         scenes=[],
         task_graph=[],
@@ -73,7 +83,9 @@ def _build_initial_state(
 class RunRequest(BaseModel):
     scene_id: int | None = None
     skip_video: bool = False
+    skip_all_gen: bool = False
     post_proc_map: Dict[str, Any] = {}
+    character_db: Optional[List[Dict[str, Any]]] = None
 
 
 @router.post("/run")
@@ -81,9 +93,11 @@ async def run_phase2(req: RunRequest):
     """Triggers the Phase 2 production pipeline, optionally filtered by scene_id."""
     try:
         initial_state = _build_initial_state(
-            scene_id=req.scene_id, 
+            scene_id=req.scene_id,
             skip_video=req.skip_video,
-            post_proc_map=req.post_proc_map
+            skip_all_gen=req.skip_all_gen,
+            post_proc_map=req.post_proc_map,
+            character_db=req.character_db,
         )
 
         logger.info("🎬 Starting Phase 2 Studio Floor production...")
@@ -164,7 +178,7 @@ async def compose_final(
         initial_state = _build_initial_state()
 
         # Populate scene_jobs from manifest so subtitles have dialogue data
-        scene_manifest_path = os.path.join("data", "outputs", "phase1", "scene_manifest.json")
+        scene_manifest_path = os.path.join(edit_ex.phase1_dir(), "scene_manifest.json")
         scene_jobs = []
         if os.path.exists(scene_manifest_path):
             with open(scene_manifest_path, "r", encoding="utf-8") as f:

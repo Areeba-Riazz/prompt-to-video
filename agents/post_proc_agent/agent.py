@@ -14,6 +14,8 @@ def post_proc_node(state: StudioState) -> dict:
     Modular Post-Production Agent.
     Applies fine-grained FX (pitch, brightness, etc.) to existing assets.
     """
+    from agents.edit_agent import edit_execution as edit_ex
+
     registry = _get_registry()
     output_root = state.get("output_root", os.environ.get("PHASE2_OUTPUT_DIR", "data/outputs/phase2"))
     post_proc_map = state.get("post_proc_map", {})
@@ -22,7 +24,11 @@ def post_proc_node(state: StudioState) -> dict:
         return {}
 
     logger.info(f"🎨 [PostProc] Applying {len(post_proc_map)} effect(s)...")
-    final_scenes = state.get("final_scenes", [])
+    final_scenes = state.get("final_scenes", []) or []
+    # Post-proc-only LangGraph runs skip upstream nodes; hydrate from disk so we do not
+    # rely on initial_state injection (which would duplicate under operator.add reducers).
+    if not final_scenes:
+        final_scenes = edit_ex.hydrate_final_scenes_for_post_proc(output_root)
     logs = []
 
     # Ensure post-processed dir exists

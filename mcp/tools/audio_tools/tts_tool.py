@@ -1,11 +1,24 @@
 import math
 import os
+import re
 import struct
 import wave
 from typing import Any, Dict, Optional, Tuple
 
 from mcp.base_tool import BaseTool
 from shared.utils.voice_mapping import edge_voice_for_character, kokoro_voice_for_character
+
+
+def _merge_edge_pitch_hz(base_pitch: str, offset_hz: int) -> str:
+    """Combine emotion pitch (e.g. '+0Hz', '-15Hz') with a per-character offset."""
+    m = re.match(r"^([+-]?)(\d+)Hz$", (base_pitch or "+0Hz").strip(), re.I)
+    cur = 0
+    if m:
+        sign = -1 if m.group(1) == "-" else 1
+        cur = sign * int(m.group(2))
+    total = cur + int(offset_hz)
+    sign = "+" if total >= 0 else "-"
+    return f"{sign}{abs(total)}Hz"
 
 
 def _edge_prosody(emotion: str) -> Tuple[str, str, str]:
@@ -88,6 +101,7 @@ def _synthesize_with_edge_tts(
     *,
     gender: Optional[str] = None,
     edge_voice: Optional[str] = None,
+    edge_pitch_offset_hz: int = 0,
 ) -> str:
     import asyncio
     import edge_tts  # type: ignore
@@ -98,6 +112,8 @@ def _synthesize_with_edge_tts(
         edge_voice=edge_voice,
     )
     rate, pitch, volume = _edge_prosody(emotion)
+    if edge_pitch_offset_hz:
+        pitch = _merge_edge_pitch_hz(pitch, edge_pitch_offset_hz)
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     mp3_path = output_path.replace(".wav", ".mp3") if output_path.endswith(".wav") else output_path + ".mp3"
 
@@ -206,6 +222,7 @@ class VoiceSynthesisTool(BaseTool):
             "edge_voice": "str | None — explicit Edge voice id (e.g. en-US-JennyNeural)",
             "tts_voice": "str | None — alias for edge_voice",
             "kokoro_voice": "str | None — explicit Kokoro voice id",
+            "edge_pitch_offset_hz": "int | 0 — extra Edge pitch shift in Hz (negative = deeper)",
         }
 
     @property
@@ -221,6 +238,10 @@ class VoiceSynthesisTool(BaseTool):
         gender = kwargs.get("gender")
         edge_voice = kwargs.get("edge_voice") or kwargs.get("tts_voice")
         kokoro_voice = kwargs.get("kokoro_voice")
+        try:
+            edge_pitch_offset_hz = int(kwargs.get("edge_pitch_offset_hz") or 0)
+        except (TypeError, ValueError):
+            edge_pitch_offset_hz = 0
 
         if os.path.dirname(output_path):
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -239,6 +260,7 @@ class VoiceSynthesisTool(BaseTool):
                 emotion,
                 gender=gender,
                 edge_voice=edge_voice,
+                edge_pitch_offset_hz=edge_pitch_offset_hz,
             )
         except Exception as e:
             print(f"[VoiceSynth] edge-tts failed: {e}. Trying Kokoro...")
