@@ -4,7 +4,7 @@ import sys
 # Inject root directory into sys.path to allow imports when running directly
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT_DIR not in sys.path:
-    sys.path.append(ROOT_DIR)
+    sys.path.insert(0, ROOT_DIR)
 
 from dotenv import load_dotenv
 load_dotenv(os.path.join(ROOT_DIR, ".env"))
@@ -18,11 +18,20 @@ from backend.websocket.manager import progress_manager
 from fastapi import WebSocket, WebSocketDisconnect
 
 from mcp.tool_registry import register_all_tools
+import asyncio
 
 # Initialize all MCP tools
 register_all_tools()
 
 app = FastAPI(title="Project Montage API")
+
+
+@app.on_event("startup")
+async def _seed_event_loop() -> None:
+    """Store the running loop on progress_manager at startup.
+    This lets sync threadpool workers (e.g. approve_hitl / image_node)
+    call report_progress even before any WebSocket client has connected."""
+    progress_manager.loop = asyncio.get_running_loop()
 
 app.add_middleware(
     CORSMiddleware,

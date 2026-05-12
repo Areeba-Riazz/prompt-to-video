@@ -127,7 +127,7 @@ export const EditPanel = ({ currentState, onStateUpdate, isOpen, setIsOpen }: Ed
       const eRes = await fetch(`${API_PHASE5}/execute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ intent_obj: intent, state: currentState }),
+        body: JSON.stringify({ intent_obj: intent, state: currentState, user_query: query }),
       });
       const eData = await eRes.json();
 

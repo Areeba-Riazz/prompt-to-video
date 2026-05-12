@@ -8,7 +8,6 @@ from agents.edit_agent.intent_classifier import classify_edit_intent
 from agents.edit_agent import edit_execution as edit_ex
 from state_manager.snapshot import StateManager
 from shared.schemas.state import MontageState
-from shared.schemas.phase2_state import StudioState
 
 router = APIRouter()
 logger = logging.getLogger("Phase5Route")
@@ -177,12 +176,46 @@ async def execute_edit(req: Dict[str, Any]):
         if target == "video":
             logger.info("🎬 [Phase 5] Re-running Compositor...")
             from agents.video_agent.agent import compositor_node
-            if intent.get("intent") == "remove_subtitles":
-                os.environ["COMPOSITOR_SUBTITLES"] = "0"
 
-            s_state = StudioState(**state)
-            result = compositor_node(s_state)
-            return {"data": result, "next_step": "completed"}
+            raw = edit_ex.coalesce_edit_state(dict(req.get("state") or {}))
+            state = edit_ex.studio_state_for_compositor_edit(raw)
+
+            if edit_ex.should_reuse_merge_for_bgm_intent(intent):
+                state["_compositor_bgm_only"] = True
+
+            user_query = str(req.get("user_query") or "")
+            params = intent.get("parameters") or {}
+            if intent.get("intent") != "remove_bgm" and params.get("apply_bgm") is not False:
+                mood_guess, boost_guess = edit_ex.infer_bgm_mood_from_intent(intent, user_query)
+                if mood_guess in edit_ex.BGM_MOODS:
+                    state["_edit_bgm_mood"] = mood_guess
+                if boost_guess:
+                    state["_edit_bgm_boost"] = boost_guess
+
+            if intent.get("intent") == "remove_subtitles":
+                state["_compositor_enable_subtitles"] = False
+
+            prev_bgm = os.environ.get("COMPOSITOR_BGM")
+            if params.get("apply_bgm") is False or intent.get("intent") == "remove_bgm":
+                os.environ["COMPOSITOR_BGM"] = "0"
+
+            try:
+                result = compositor_node(state)
+            finally:
+                if prev_bgm is None:
+                    os.environ.pop("COMPOSITOR_BGM", None)
+                else:
+                    os.environ["COMPOSITOR_BGM"] = prev_bgm
+
+            prev = dict(req.get("state") or {})
+            merged = {**prev}
+            if result.get("final_output_path"):
+                merged["final_output_path"] = result["final_output_path"]
+            if result.get("task_logs") is not None:
+                merged["task_logs"] = result.get("task_logs")
+            if result.get("status"):
+                merged["status"] = result["status"]
+            return {"data": merged, "next_step": "completed"}
 
         raise HTTPException(
             status_code=400,

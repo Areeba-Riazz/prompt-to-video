@@ -437,8 +437,9 @@ This README maps directly to the **Agentic AI Project 2026** requirements:
 ## Further documentation
 
 - **`docs/Agentic AI Final Project - 2026.pdf`** — official brief, submission rules, and rubric context.  
+- **`docs/PROJECT_COMPLETION_ROADMAP.md`** — phased implementation plan, demo priorities (**P0/P1**), peer baseline (§5.4), and **§12 Living implementation status** (what is already done in code vs still open).  
 - **`backend/README.md`** and **`frontend/README.md`** — component-local notes if present.  
-- **`docs/REMAINING_TASKS.md`** — internal tracker for unfinished items.
+- **`docs/REMAINING_TASKS.md`** — internal tracker for unfinished items (see roadmap §12 for a fresher “completed vs open” snapshot).
 
 ---
 

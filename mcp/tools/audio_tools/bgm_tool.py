@@ -19,18 +19,24 @@ output_path  : str  — destination video with BGM mixed in
 mood         : str  — "happy" | "sad" | "tense" | "calm" | "epic" | "neutral"
 volume       : float— BGM volume relative to dialogue (default: 0.12)
 loop_bgm     : bool — loop BGM to match video duration (default: True)
+freesound_query_boost : str — optional extra Freesound search text (locations, style); from shared.bgm_plan
 """
 
+import logging
 import math
 import os
+import random
 import shutil
 import struct
 import subprocess
 import tempfile
 import wave
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlencode
 
 from mcp.base_tool import BaseTool
+
+logger = logging.getLogger("BGMTool")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -136,40 +142,64 @@ MOOD_FREESOUND_QUERY: Dict[str, str] = {
 }
 
 
-def _try_freesound_download(mood: str, dest_path: str) -> bool:
-    """Try to download a mood-matched track from Freesound. Returns True on success."""
+def _try_freesound_download(
+    mood: str,
+    dest_path: str,
+    query_boost: str = "",
+    *,
+    vary_pick: bool = False,
+) -> bool:
+    """
+    Try to download a mood-matched track from Freesound.
+    query_boost: extra words from story (locations, style) appended to the mood baseline query.
+    """
     api_key = os.environ.get("FREESOUND_API_KEY", "").strip()
     if not api_key:
         return False
     try:
-        import urllib.request
         import json as _json
+        import urllib.request
 
-        query = MOOD_FREESOUND_QUERY.get(mood, "ambient music")
-        url = (
-            f"https://freesound.org/apiv2/search/text/"
-            f"?query={query.replace(' ', '+')}&fields=id,name,previews"
-            f"&filter=duration:[5 TO 60]&page_size=5&token={api_key}"
-        )
-        with urllib.request.urlopen(url, timeout=10) as resp:
+        base = MOOD_FREESOUND_QUERY.get(mood, "ambient music")
+        extra = (query_boost or "").strip()
+        query = f"{base} {extra}".strip() if extra else base
+        query = " ".join(query.split())[:200]
+
+        params = {
+            "query": query,
+            "fields": "id,name,previews",
+            "filter": "duration:[5 TO 120]",
+            "page_size": "8",
+            "token": api_key,
+        }
+        url = "https://freesound.org/apiv2/search/text/?" + urlencode(params)
+        logger.info("[BGM] Freesound search: %s", query[:120])
+        with urllib.request.urlopen(url, timeout=15) as resp:
             data = _json.loads(resp.read())
 
         results = data.get("results", [])
         if not results:
             return False
 
-        preview_url = results[0]["previews"].get("preview-hq-mp3") or results[0]["previews"].get("preview-lq-mp3")
-        if not preview_url:
+        candidates: List[str] = []
+        for hit in results[:12]:
+            previews = hit.get("previews") or {}
+            url = previews.get("preview-hq-mp3") or previews.get("preview-lq-mp3")
+            if url:
+                candidates.append(url)
+        if not candidates:
             return False
 
-        # Download mp3 preview
+        pool = candidates[: min(5, len(candidates))]
+        preview_url = random.choice(pool) if vary_pick else pool[0]
+
         mp3_path = dest_path.replace(".wav", ".mp3")
         urllib.request.urlretrieve(preview_url, mp3_path)
 
-        # Convert to WAV via ffmpeg
         result = subprocess.run(
             ["ffmpeg", "-y", "-i", mp3_path, "-ar", "44100", "-ac", "1", dest_path],
-            capture_output=True, timeout=60,
+            capture_output=True,
+            timeout=60,
         )
         try:
             os.remove(mp3_path)
@@ -177,7 +207,7 @@ def _try_freesound_download(mood: str, dest_path: str) -> bool:
             pass
         return result.returncode == 0 and os.path.exists(dest_path)
     except Exception as e:
-        print(f"[BGM] Freesound download failed: {e}")
+        logger.warning("[BGM] Freesound download failed: %s", e)
         return False
 
 
@@ -237,8 +267,8 @@ def _mix_bgm_into_video(
 
 class BGMTool(BaseTool):
     """
-    Mixes mood-appropriate background music into a video.
-    Synthesises an ambient pad if no external source is available.
+    Mixes story-aware background music into a video (Freesound + mood pad fallback).
+    Pass freesound_query_boost from shared.bgm_plan.plan_bgm for scene-tailored searches.
     """
 
     @property
@@ -260,6 +290,8 @@ class BGMTool(BaseTool):
             "mood": "str — happy | sad | tense | calm | epic | neutral (default: neutral)",
             "volume": "float — BGM volume 0.0–1.0 (default: 0.12)",
             "loop_bgm": "bool — loop BGM to fill video duration (default: True)",
+            "freesound_query_boost": "str — optional extra Freesound search words (locations, style)",
+            "vary_freesound_pick": "bool — pick randomly among top Freesound previews (e.g. BGM re-roll)",
         }
 
     @property
@@ -272,6 +304,8 @@ class BGMTool(BaseTool):
         mood: str = kwargs.get("mood", "neutral").lower()
         volume: float = float(kwargs.get("volume", 0.12))
         loop_bgm: bool = bool(kwargs.get("loop_bgm", True))
+        query_boost: str = str(kwargs.get("freesound_query_boost", "") or "").strip()
+        vary_pick: bool = bool(kwargs.get("vary_freesound_pick", False))
 
         if not video_path or not os.path.exists(video_path):
             return {"ok": False, "error": f"video_path not found: {video_path!r}"}
@@ -286,14 +320,22 @@ class BGMTool(BaseTool):
         # Add 5 s padding so BGM doesn't cut off abruptly at end
         pad_duration = duration + 5.0
 
-        print(f"[BGM] Video duration: {duration:.1f}s | Mood: {mood} | Volume: {volume}")
+        logger.info(
+            "[BGM] duration=%.1fs mood=%s volume=%.3f boost=%r",
+            duration,
+            mood,
+            volume,
+            query_boost[:80] if query_boost else "",
+        )
 
+        used_freesound = False
         with tempfile.TemporaryDirectory() as work_dir:
             bgm_path = os.path.join(work_dir, f"bgm_{mood}.wav")
 
-            # Try Freesound first (if API key available)
-            if not _try_freesound_download(mood, bgm_path):
-                print(f"[BGM] Synthesising ambient pad for mood '{mood}'…")
+            if _try_freesound_download(mood, bgm_path, query_boost=query_boost, vary_pick=vary_pick):
+                used_freesound = True
+            else:
+                logger.info("[BGM] Synthesising ambient pad for mood %r", mood)
                 _synthesise_pad(mood, pad_duration, bgm_path)
 
             result = _mix_bgm_into_video(
@@ -305,16 +347,16 @@ class BGMTool(BaseTool):
             )
 
         if not result.get("ok"):
-            # Last resort: just copy video unchanged
-            print(f"[BGM] Mix failed ({result.get('error')}). Copying original video.")
-            shutil.copy2(video_path, output_path)
-            return {"ok": True, "output_path": output_path, "method": "passthrough", "error": result.get("error")}
+            err = result.get("error", "unknown")
+            logger.warning("[BGM] Mix failed (%s); not overwriting output.", err)
+            return {"ok": False, "error": err}
 
-        print(f"[BGM] ✅ BGM mixed into {os.path.basename(output_path)}")
+        logger.info("[BGM] mixed into %s", os.path.basename(output_path))
+        method = "freesound" if used_freesound else "synthesised_pad"
         return {
             "ok": True,
             "output_path": output_path,
             "mood": mood,
             "volume": volume,
-            "method": "synthesised_pad" if not os.environ.get("FREESOUND_API_KEY") else "freesound",
+            "method": method,
         }

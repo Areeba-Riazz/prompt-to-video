@@ -138,6 +138,8 @@ const Phase2 = () => {
   const [phase2Done, setPhase2Done] = useState(false);
   const [refScript, setRefScript] = useState<{ scenes: Scene[] } | null>(null);
   const [refChars, setRefChars] = useState<Character[]>([]);
+  /** Live character_db — starts from refChars, accumulates AI-edit mutations. */
+  const [liveCharDb, setLiveCharDb] = useState<Character[]>([]);
   // Phase 3 composition state
   const [compositing, setCompositing] = useState(false);
   const [compositeResult, setCompositeResult] = useState<{ size_mb: number; transition: string; bgm_enabled: boolean; subtitles_enabled: boolean } | null>(null);
@@ -150,7 +152,7 @@ const Phase2 = () => {
     try {
       const [sr, cr] = await Promise.all([fetch(`${API}/phase1/script`), fetch(`${API}/phase1/characters`)]);
       if (sr.ok) { const d = await sr.json(); if (d.data?.scenes) setRefScript({ scenes: d.data.scenes }); }
-      if (cr.ok) { const d = await cr.json(); if (d.data) setRefChars(d.data); }
+      if (cr.ok) { const d = await cr.json(); if (d.data) { setRefChars(d.data); setLiveCharDb(d.data); } }
     } catch { /* Phase 1 not yet run */ }
   }, []);
 
@@ -263,14 +265,41 @@ const Phase2 = () => {
     if (newState.final_scenes) {
       setSceneResults(dedupeScenesById(newState.final_scenes));
     } else if (newState.audio_tracks) {
-      // If it's a StudioState update
-      setSceneResults(prev => dedupeScenesById([...prev])); 
+      setSceneResults(prev => dedupeScenesById([...prev]));
     }
-    
+
+    // 1b. Accumulate character_db changes so the next edit sees updated voices/genders.
+    const updatedChars: Character[] | undefined =
+      newState.character_db ?? newState.characters;
+    if (Array.isArray(updatedChars) && updatedChars.length > 0) {
+      setLiveCharDb(updatedChars);
+    }
+
     // 2. Refresh assets (cache busting)
     setRunNonce(n => n + 1);
     setFinalVideoNonce(n => n + 1);
     setPhase2Done(true);
+
+    if (nextStep === 'completed') {
+      void (async () => {
+        try {
+          const res = await fetch(`${API}/phase2/final/status`);
+          if (!res.ok) return;
+          const d = await res.json();
+          const meta = d.data?.metadata;
+          if (d.data?.exists && meta) {
+            setCompositeResult({
+              size_mb: d.data.size_mb ?? 0,
+              transition: String(meta.transition ?? 'xfade'),
+              bgm_enabled: Boolean(meta.bgm_enabled),
+              subtitles_enabled: Boolean(meta.subtitles_enabled),
+            });
+          }
+        } catch {
+          /* ignore */
+        }
+      })();
+    }
 
     // 3. Trigger targeted re-run if requested by Edit Agent
     if (nextStep === 'phase2_partial') {
@@ -698,8 +727,8 @@ const Phase2 = () => {
           <EditPanel 
             currentState={{
               scenes: refScript?.scenes ?? [],
-              characters: refChars,
-              character_db: refChars,
+              characters: liveCharDb,
+              character_db: liveCharDb,
               final_scenes: displayScenes,
               audio_tracks: [],
               scene_manifest_path: "data/outputs/phase1/scene_manifest.json"

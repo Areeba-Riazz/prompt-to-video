@@ -404,9 +404,10 @@ class CharacterDesigner:
         logger.info("🎭 [Character Designer] Extracting character identities...")
 
         # ── Wipe previous character DB so a new script starts clean ──────────
+        from shared.repo_paths import resolve_from_repo as _resolve
         import os as _os
         _db_path = _os.path.join(
-            _os.environ.get("PHASE1_OUTPUT_DIR", "data/outputs/phase1"),
+            _resolve(_os.environ.get("PHASE1_OUTPUT_DIR", "data/outputs/phase1")),
             "character_db.json",
         )
         if _os.path.exists(_db_path):
@@ -517,6 +518,8 @@ class ImageSynthesizer:
 
         synth_max = int(os.environ.get("IMAGE_GEN_SYNTH_MAX_ATTEMPTS", "6"))
         synth_backoff = float(os.environ.get("IMAGE_GEN_SYNTH_BACKOFF_SEC", "22"))
+        # Pause between characters to avoid Pollinations 429 rate-limits.
+        inter_char_delay = float(os.environ.get("IMAGE_GEN_INTER_CHAR_DELAY_SEC", "5"))
 
         def _portrait_ok(res: dict) -> bool:
             if not res.get("ok"):
@@ -524,11 +527,12 @@ class ImageSynthesizer:
             eng = str(res.get("engine", ""))
             return "local_stylized_fallback" not in eng
 
-        for char in characters:
+        for char_idx, char in enumerate(characters):
             logger.info(f"   -> Requesting synthetic image for: {char.name}")
             safe_name = re.sub(r"[^a-z0-9]+", "_", char.name.lower()).strip("_")
-            phase1_dir = os.environ.get("PHASE1_OUTPUT_DIR", "data/outputs/phase1")
-            image_path = f"{phase1_dir}/image_assets/{safe_name}.png"
+            from shared.repo_paths import resolve_from_repo as _resolve_p1
+            phase1_dir = _resolve_p1(os.environ.get("PHASE1_OUTPUT_DIR", "data/outputs/phase1"))
+            image_path = os.path.join(phase1_dir, "image_assets", f"{safe_name}.png")
 
             base_prompt = (
                 f"Character portrait, {char.name}. {char.appearance} "
@@ -571,6 +575,14 @@ class ImageSynthesizer:
 
             # Commit the updated character (with image_path) back to persistent storage
             mcp_registry.call_tool("commit_memory", key=f"char_{char.name}", data=char.dict())
+
+            # Brief pause between characters so Pollinations doesn't rate-limit us.
+            if char_idx < len(characters) - 1 and inter_char_delay > 0:
+                logger.info(
+                    "   -> Waiting %.0fs before next character image (rate-limit buffer)…",
+                    inter_char_delay,
+                )
+                time.sleep(inter_char_delay)
 
         state["current_agent"] = "ImageSynthesizer"
         state["status"] = "completed"

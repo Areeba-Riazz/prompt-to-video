@@ -17,9 +17,15 @@ pip install -r requirements.txt
 ```
 
 ### Development
+`backend.app` is only importable when the **repository root** (the folder that contains `backend/`) is on Python’s module path—normally your current working directory.
+
 ```bash
-# Start the FastAPI server
+# Recommended: current directory = repository root
 python -m uvicorn backend.app:app --reload --host 127.0.0.1 --port 8000
+
+# If your shell is already inside backend/, use the local module name (app.py adds the repo root to sys.path)
+python -m uvicorn app:app --reload --host 127.0.0.1 --port 8000
+# equivalent: python app.py
 ```
 The API documentation (Swagger UI) will be available at [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
 

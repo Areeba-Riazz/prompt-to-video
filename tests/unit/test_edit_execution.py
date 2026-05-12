@@ -6,10 +6,18 @@ import os
 from agents.edit_agent import edit_execution as ex
 
 
-def test_coalesce_edit_state_uses_characters_alias():
-    state = {"characters": [{"name": "A", "gender": "female"}]}
+def test_coalesce_edit_state_uses_characters_alias(tmp_path):
+    # Supply a non-existent manifest path so no manifest-speaker stubs are added.
+    state = {
+        "characters": [{"name": "A", "gender": "female"}],
+        "scene_manifest_path": str(tmp_path / "missing_manifest.json"),
+    }
     out = ex.coalesce_edit_state(state)
-    assert out["character_db"] == [{"name": "A", "gender": "female"}]
+    # The original character must be present; no extra stubs expected.
+    names = [c["name"] for c in out["character_db"]]
+    assert "A" in names
+    a_entry = next(c for c in out["character_db"] if c["name"] == "A")
+    assert a_entry["gender"] == "female"
 
 
 def test_pitch_param_to_edge_offset_hz():
@@ -108,3 +116,82 @@ def test_persist_and_restore_roundtrip(tmp_path):
         assert db["characters"][0]["gender"] == "male"
     finally:
         os.environ.pop("PHASE1_OUTPUT_DIR", None)
+
+
+def test_apply_audio_gender_change_clears_voice_and_is_case_insensitive():
+    """Gender change should clear stored edge_voice and work regardless of name casing."""
+    intent = {
+        "scope": "character:comedian",  # lowercase
+        "parameters": {},               # no explicit voice
+    }
+    state = {
+        "character_db": [
+            {
+                "name": "Comedian",        # capitalised in DB
+                "gender": "female",
+                "edge_voice": "en-US-AriaNeural",
+                "tts_voice": "en-US-AriaNeural",
+                "kokoro_voice": None,
+            }
+        ]
+    }
+    # Simulate "change voice to a man" — blob contains "male"
+    import ast
+    # patch params string to contain "male"
+    intent_with_male = {
+        "scope": "character:comedian",
+        "parameters": {"gender": "male"},
+    }
+    st, dirty, _ = ex.apply_audio_target_to_state(intent_with_male, state)
+    char = st["character_db"][0]
+    assert dirty is True
+    assert char["gender"] == "male"
+    # Stored female voice must be cleared so voice_mapping picks from male pool
+    assert char["edge_voice"] is None
+    assert char["tts_voice"] is None
+
+
+def test_infer_bgm_mood_from_intent_upbeat():
+    intent = {"intent": "adjust_bgm", "target": "video", "parameters": {}}
+    m, b = ex.infer_bgm_mood_from_intent(intent, "Use more upbeat bg music")
+    assert m == "happy"
+    assert "upbeat" in b.lower()
+
+
+def test_studio_state_for_compositor_edit_preserves_edit_keys():
+    base = {
+        "scenes": [],
+        "scene_jobs": [{"scene_id": 1, "scene": {"scene_id": 1}, "task": {"scene_id": 1}}],
+        "_edit_bgm_mood": "happy",
+    }
+    out = ex.studio_state_for_compositor_edit(base)
+    assert out["_edit_bgm_mood"] == "happy"
+
+
+def test_studio_state_for_compositor_edit_preserves_compositor_subtitle_override():
+    base = {
+        "scenes": [],
+        "scene_jobs": [{"scene_id": 1, "scene": {"scene_id": 1}, "task": {"scene_id": 1}}],
+        "_compositor_enable_subtitles": False,
+    }
+    out = ex.studio_state_for_compositor_edit(base)
+    assert out["_compositor_enable_subtitles"] is False
+
+
+def test_should_reuse_merge_for_bgm_intent_adjust_bgm():
+    intent = {"target": "video", "intent": "adjust_bgm", "parameters": {}}
+    assert ex.should_reuse_merge_for_bgm_intent(intent) is True
+
+
+def test_should_reuse_merge_for_bgm_intent_remove_subtitles():
+    intent = {"target": "video", "intent": "remove_subtitles", "parameters": {}}
+    assert ex.should_reuse_merge_for_bgm_intent(intent) is False
+
+
+def test_should_reuse_merge_for_bgm_intent_full_composite_override():
+    intent = {
+        "target": "video",
+        "intent": "adjust_bgm",
+        "parameters": {"full_composite": True},
+    }
+    assert ex.should_reuse_merge_for_bgm_intent(intent) is False

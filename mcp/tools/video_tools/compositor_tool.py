@@ -35,7 +35,7 @@ def _sorted_scene_files(scene_dir: str) -> List[str]:
 
 
 def _probe_duration(path: str) -> float:
-    """Return video duration in seconds using ffprobe."""
+    """Return video duration in seconds using ffprobe (stream duration, else container)."""
     try:
         result = subprocess.run(
             [
@@ -48,10 +48,28 @@ def _probe_duration(path: str) -> float:
             capture_output=True,
             timeout=30,
         )
-        val = result.stdout.decode().strip().split("\n")[0]
-        return float(val)
+        val = result.stdout.decode().strip().split("\n")[0].strip()
+        if val and val != "N/A":
+            return float(val)
     except Exception:
-        return 0.0
+        pass
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                path,
+            ],
+            capture_output=True,
+            timeout=30,
+        )
+        val = result.stdout.decode().strip().split("\n")[0].strip()
+        if val and val != "N/A":
+            return float(val)
+    except Exception:
+        pass
+    return 0.0
 
 
 def _get_video_info(path: str) -> Dict[str, Any]:
@@ -205,14 +223,13 @@ def _concat_with_xfade(
     final_a = a_label
 
     filter_graph = ";".join(filter_parts + audio_parts)
-    filter_graph += f";{final_v}[vfinal];{final_a}[afinal]"
 
     cmd = [
         "ffmpeg", "-y",
         *inputs,
         "-filter_complex", filter_graph,
-        "-map", "[vfinal]",
-        "-map", "[afinal]",
+        "-map", final_v,
+        "-map", final_a,
         "-c:v", "libx264", "-preset", "fast", "-crf", "23",
         "-c:a", "aac", "-b:a", "128k",
         "-movflags", "+faststart",
@@ -220,9 +237,11 @@ def _concat_with_xfade(
     ]
     result = subprocess.run(cmd, capture_output=True, timeout=900)
     if result.returncode != 0:
-        err = result.stderr.decode(errors="ignore")[-800:]
+        err = result.stderr.decode(errors="ignore")
+        lines = [ln for ln in err.strip().splitlines() if ln.strip()]
+        tail = "\n".join(lines[-20:]) if lines else err[-1200:]
         # Fallback to simple concat if xfade fails (e.g. too many clips for memory)
-        print(f"[Compositor] xfade failed ({err[:200]}). Falling back to simple concat.")
+        print(f"[Compositor] xfade ffmpeg failed; last stderr lines:\n{tail}")
         _concat_no_transition(normed, output_path)
 
 

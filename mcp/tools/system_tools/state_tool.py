@@ -3,6 +3,11 @@ import json
 import os
 from mcp.base_tool import BaseTool
 from state_manager.memory_manager import memory_manager
+from shared.repo_paths import resolve_from_repo as _resolve_repo
+
+
+def _phase1_dir() -> str:
+    return _resolve_repo(os.environ.get("PHASE1_OUTPUT_DIR", "data/outputs/phase1"))
 
 class MemoryCommitTool(BaseTool):
     @property
@@ -50,7 +55,7 @@ class MemoryCommitTool(BaseTool):
                 )
                 
                 # Write to character_db.json
-                phase1_dir = os.environ.get("PHASE1_OUTPUT_DIR", "data/outputs/phase1")
+                phase1_dir = _phase1_dir()
                 db_path = os.path.join(phase1_dir, "character_db.json")
                 os.makedirs(phase1_dir, exist_ok=True)
                 
@@ -75,7 +80,7 @@ class MemoryCommitTool(BaseTool):
 
             elif key == "final_manifest":
                 # Write to scene_manifest.json
-                phase1_dir = os.environ.get("PHASE1_OUTPUT_DIR", "data/outputs/phase1")
+                phase1_dir = _phase1_dir()
                 manifest_path = os.path.join(phase1_dir, "scene_manifest.json")
                 os.makedirs(phase1_dir, exist_ok=True)
                 

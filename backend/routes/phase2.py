@@ -9,6 +9,7 @@ from typing import Dict, Any, Optional, List
 from agents.orchestrator.graph_phase2 import studio_floor_workflow
 from agents.edit_agent import edit_execution as edit_ex
 from shared.schemas.phase2_state import StudioState
+from shared.repo_paths import resolve_from_repo
 
 router = APIRouter()
 graph = studio_floor_workflow()
@@ -16,7 +17,7 @@ logger = logging.getLogger("Phase2Route")
 
 # ── Endpoints for Phase 2 Production ────────────────────────────────────────
 
-OUTPUT_ROOT = os.path.join("data", "outputs", "phase2")
+OUTPUT_ROOT = resolve_from_repo(os.environ.get("PHASE2_OUTPUT_DIR", os.path.join("data", "outputs", "phase2")))
 
 
 def _build_initial_state(

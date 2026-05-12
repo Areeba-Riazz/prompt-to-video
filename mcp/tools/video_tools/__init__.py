@@ -1,0 +1,1 @@
+"""Video-related MCP tools."""

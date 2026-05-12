@@ -514,17 +514,40 @@ def compositor_node(state: StudioState) -> dict:
     transition_s = float(os.environ.get("COMPOSITOR_TRANSITION_S", "0.5"))
     enable_bgm = os.environ.get("COMPOSITOR_BGM", "1") != "0"
     bgm_volume = float(os.environ.get("COMPOSITOR_BGM_VOLUME", "0.12"))
-    enable_subs = os.environ.get("COMPOSITOR_SUBTITLES", "1") != "0"
+    # Prefer per-invocation override (Phase 5) so we never leak COMPOSITOR_SUBTITLES via os.environ.
+    if "_compositor_enable_subtitles" in state:
+        enable_subs = bool(state.get("_compositor_enable_subtitles"))
+    else:
+        enable_subs = os.environ.get("COMPOSITOR_SUBTITLES", "1") != "0"
 
     jobs = state.get("scene_jobs", [])
     if not jobs:
         logger.warning("[Compositor] No scene jobs found.")
         return {"final_output_path": "", "task_logs": logs}
 
+    merged_path = os.path.join(phase3_dir, "merged.mp4")
+    bgm_only = bool(state.get("_compositor_bgm_only"))
+    reuse_merge = (
+        bgm_only
+        and os.path.isfile(merged_path)
+        and os.path.getsize(merged_path) > 1000
+    )
+    if bgm_only and not reuse_merge:
+        logger.warning(
+            "[Compositor] BGM-only remix requested but %s is missing or empty; running full composite.",
+            merged_path,
+        )
+
     # ── Step 1: Subtitles (Per Scene) ────────────────────────────────────────
-    scenes_to_merge_dir = scenes_dir # Default to original scenes
-    
-    if enable_subs:
+    scenes_to_merge_dir = scenes_dir  # Default to original scenes
+
+    if reuse_merge:
+        logger.info(
+            "[Compositor] Reusing merged master (skipping subtitle burn + re-merge): %s",
+            merged_path,
+        )
+        logs.append({"agent": "Compositor", "event": "reused_merge", "path": merged_path})
+    elif enable_subs:
         report_progress("phase3", "Subtitles", "running", "Burning subtitles into each scene...")
         logger.info("📝 [Compositor] Burning subtitles per-scene...")
         
@@ -573,56 +596,135 @@ def compositor_node(state: StudioState) -> dict:
 
     # ── Step 2: Composite scenes ─────────────────────────────────────────────
     report_progress("phase3", "Compositing", "running", "Merging scene clips into final movie…")
-    logger.info("🎞️ [Compositor] Merging scenes...")
-    
-    merged_path = os.path.join(phase3_dir, "merged.mp4")
-    comp_result = registry.invoke("compositor_tool", {
-        "scene_dir": scenes_to_merge_dir,
-        "output_path": merged_path,
-        "transition": transition,
-        "transition_duration": transition_s,
-    })
+    logger.info("🎞️ [Compositor] Merging scenes…")
 
-    if not comp_result.get("ok"):
-        err = comp_result.get("error", "Unknown compositor error")
-        logger.error("Compositor failed: %s", err)
-        logs.append({"agent": "Compositor", "event": "failed", "error": err})
-        return {"final_output_path": "", "task_logs": logs}
-
-    logs.append({
-        "agent": "Compositor",
-        "event": "merged",
-        "clips": comp_result.get("clips_merged"),
-        "transition": transition,
-    })
-
-    current_video = merged_path
-
-    # ── Step 3: BGM ──────────────────────────────────────────────────────────
-    if enable_bgm:
-        report_progress("phase3", "BGM", "running", "Mixing background music…")
-        logger.info("🎵 [Compositor] Mixing BGM…")
-
-        mood = "neutral"
-        if jobs:
-            first_scene = jobs[0].get("scene", {})
-            dialogue = first_scene.get("dialogue", [])
-            if dialogue:
-                mood = dialogue[0].get("emotion", "neutral") or "neutral"
-
-        bgm_out = os.path.join(phase3_dir, "merged_bgm.mp4")
-        bgm_result = registry.invoke("bgm_tool", {
-            "video_path": current_video,
-            "output_path": bgm_out,
-            "mood": mood,
-            "volume": bgm_volume,
-            "loop_bgm": True,
+    if reuse_merge:
+        current_video = merged_path
+        comp_result = {
+            "ok": True,
+            "clips_merged": len(jobs),
+            "transition": transition,
+        }
+    else:
+        comp_result = registry.invoke("compositor_tool", {
+            "scene_dir": scenes_to_merge_dir,
+            "output_path": merged_path,
+            "transition": transition,
+            "transition_duration": transition_s,
         })
 
-        if bgm_result.get("ok"):
-            current_video = bgm_out
-            logs.append({"agent": "BGM", "event": "mixed", "mood": mood})
-            logger.info("✅ [Compositor] BGM mixed")
+        if not comp_result.get("ok"):
+            err = comp_result.get("error", "Unknown compositor error")
+            logger.error("Compositor failed: %s", err)
+            logs.append({"agent": "Compositor", "event": "failed", "error": err})
+            return {"final_output_path": "", "task_logs": logs}
+
+        logs.append({
+            "agent": "Compositor",
+            "event": "merged",
+            "clips": comp_result.get("clips_merged"),
+            "transition": transition,
+        })
+
+        current_video = merged_path
+
+    # ── Step 3: BGM (story-aware mood + optional skip) ─────────────────────────
+    bgm_plan: Dict[str, Any] = {}
+    smart_bgm = os.environ.get("BGM_USE_SMART_PLAN", "1").strip().lower() not in ("0", "false", "no", "off")
+
+    if enable_bgm:
+        report_progress("phase3", "BGM", "running", "Planning and mixing background music…")
+        logger.info("🎵 [Compositor] BGM planning…")
+
+        if smart_bgm:
+            from shared.bgm_plan import plan_bgm
+
+            manifest_path = state.get("scene_manifest_path")
+            bgm_plan = plan_bgm(jobs, manifest_path=manifest_path)
+            mood = str(bgm_plan.get("mood", "neutral"))
+            vol_mult = float(bgm_plan.get("volume_multiplier", 1.0))
+            boost = str(bgm_plan.get("freesound_boost", "") or "")
+            apply_story_bgm = bool(bgm_plan.get("apply_bgm", True))
+            logger.info(
+                "[Compositor] BGM plan: apply=%s mood=%s vol×=%.2f reason=%s",
+                apply_story_bgm,
+                mood,
+                vol_mult,
+                bgm_plan.get("reason", ""),
+            )
+        else:
+            mood = "neutral"
+            if jobs:
+                first_scene = jobs[0].get("scene", {})
+                dialogue = first_scene.get("dialogue", [])
+                if dialogue:
+                    mood = dialogue[0].get("emotion", "neutral") or "neutral"
+            if mood not in ("happy", "sad", "tense", "calm", "epic", "neutral"):
+                mood = "neutral"
+            vol_mult = 1.0
+            boost = ""
+            apply_story_bgm = True
+            bgm_plan = {
+                "apply_bgm": True,
+                "mood": mood,
+                "freesound_boost": "",
+                "volume_multiplier": 1.0,
+                "reason": "BGM_USE_SMART_PLAN off (first-line emotion only)",
+            }
+
+        # Optional Phase 5 AI-edit overrides (e.g. "more upbeat bg music")
+        edit_mood = str(state.get("_edit_bgm_mood") or "").strip().lower()
+        edit_boost = str(state.get("_edit_bgm_boost") or "").strip()
+        if edit_mood in ("happy", "sad", "tense", "calm", "epic", "neutral"):
+            mood = edit_mood
+            bp = dict(bgm_plan) if isinstance(bgm_plan, dict) else {}
+            bp["mood"] = edit_mood
+            r0 = str(bp.get("reason", ""))
+            bp["reason"] = f"{r0};edit_mood_override" if r0 else "edit_mood_override"
+            bgm_plan = bp
+        if edit_boost:
+            boost = f"{boost} {edit_boost}".strip()[:220]
+            if isinstance(bgm_plan, dict):
+                bp = dict(bgm_plan)
+                bp["freesound_boost"] = boost
+                bgm_plan = bp
+        if edit_mood or edit_boost:
+            apply_story_bgm = True
+
+        vary_pick = bool(reuse_merge or edit_mood or edit_boost)
+
+        if apply_story_bgm:
+            bgm_out = os.path.join(phase3_dir, "merged_bgm.mp4")
+            eff_volume = max(0.0, min(1.0, bgm_volume * vol_mult))
+            bgm_result = registry.invoke("bgm_tool", {
+                "video_path": current_video,
+                "output_path": bgm_out,
+                "mood": mood,
+                "volume": eff_volume,
+                "loop_bgm": True,
+                "freesound_query_boost": boost,
+                "vary_freesound_pick": vary_pick,
+            })
+
+            if bgm_result.get("ok"):
+                current_video = bgm_out
+                logs.append({
+                    "agent": "BGM",
+                    "event": "mixed",
+                    "mood": mood,
+                    "volume": eff_volume,
+                    "method": bgm_result.get("method"),
+                })
+                logger.info("✅ [Compositor] BGM mixed (mood=%s method=%s)", mood, bgm_result.get("method"))
+            else:
+                err = bgm_result.get("error", "unknown")
+                logs.append({"agent": "BGM", "event": "failed", "error": err})
+                logger.warning("[Compositor] BGM mix failed, keeping dialogue-only master: %s", err)
+        else:
+            logs.append({"agent": "BGM", "event": "skipped_by_plan", "reason": bgm_plan.get("reason", "")})
+            logger.info("🎵 [Compositor] BGM omitted by story plan")
+    else:
+        bgm_plan = {"apply_bgm": False, "reason": "COMPOSITOR_BGM disabled"}
 
     # ── Step 4: Finalize ─────────────────────────────────────────────────────
     final_path = os.path.join(base_outputs, "final_output.mp4")
@@ -636,6 +738,7 @@ def compositor_node(state: StudioState) -> dict:
         "final_output_path": final_path,
         "transition": transition,
         "bgm_enabled": enable_bgm,
+        "bgm_plan": bgm_plan,
         "subtitles_enabled": enable_subs,
         "clips_merged": comp_result.get("clips_merged", 0),
         "logs": logs,

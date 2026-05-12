@@ -19,7 +19,7 @@ TARGET CATEGORIES:
 2. "audio_fx" — Targets fine-grained audio properties (pitch, speed, volume, filters like radio/reverb) on EXISTING audio.
 3. "video_frame" — Targets visual prompts or still image generation for one or more scenes (change what is in the scene).
 4. "video_fx" — Targets fine-grained visual properties (brightness, contrast, saturation, sepia, grayscale) on EXISTING video.
-5. "video" — Targets the full compositing step (subtitles, transitions, global BGM).
+5. "video" — Targets the full compositing step (subtitles, transitions, global BGM). Use for "change background music", "more upbeat score", "remove music", "quieter bed", "different BGM mood".
 6. "script" — Targets the story/script output. Requires re-running Phase 1.
 
 JSON SCHEMA:
@@ -40,7 +40,9 @@ JSON SCHEMA:
 
 ROUTING RULES:
 - Deeper/higher pitch on existing dialogue without changing words: prefer "audio_fx" + parameters.pitch (0.5–1.0 = deeper, 1.0+ = higher), scope "character:{Name}" if a name is given, else "global".
-- Changing voice identity (gender, accent, different neural voice) or re-synthesizing after script tweaks: use "audio" + scope "character:{Name}"; include parameters.pitch when the user mentions deeper/higher so TTS prosody updates on regeneration.
+- Changing voice identity (gender, accent, different neural voice) or re-synthesizing after script tweaks: use "audio" + scope "character:{Name}". When the user says "change to a man/male voice" or "change to a woman/female voice", include parameters.gender ("male" or "female"). Do NOT include parameters.pitch unless the user explicitly asked for deeper/higher pitch; the gender field already routes TTS to the correct voice pool.
+- Background music / score / underscore / "more upbeat" / "different mood music" / "remove BGM": use target "video" with parameters.mood in happy|sad|tense|calm|epic|neutral and optional parameters.bgm_style as a short natural-language hint for music search.
+- If the user ONLY wants background music changed (no subtitle, transition, or scene edits), set parameters.remix_bgm_only to true. If they explicitly need a full re-composite (e.g. re-burn subtitles or re-merge after scene swaps), set parameters.full_composite to true.
 
 EXAMPLES:
 - "Make Alex's voice deeper" -> {"intent": "pitch_shift", "target": "audio_fx", "scope": "character:Alex", "parameters": {"pitch": 0.8}}
@@ -48,6 +50,11 @@ EXAMPLES:
 - "Make the first scene a bit darker" -> {"intent": "adjust_brightness", "target": "video_fx", "scope": "scene:1", "parameters": {"brightness": -0.2}}
 - "Turn the whole video black and white" -> {"intent": "apply_filter", "target": "video_fx", "scope": "global", "parameters": {"filter_type": "grayscale"}}
 - "Change Alex's line to 'Hello there'" -> {"intent": "change_dialogue", "target": "audio", "scope": "character:Alex", "parameters": {"text": "Hello there"}}
+- "Change the comedian's voice to a man" -> {"intent": "change_voice_gender", "target": "audio", "scope": "character:Comedian", "parameters": {"gender": "male"}}
+- "Make Sarah sound female" -> {"intent": "change_voice_gender", "target": "audio", "scope": "character:Sarah", "parameters": {"gender": "female"}}
+- "Use more upbeat background music" -> {"intent": "adjust_bgm", "target": "video", "scope": "global", "parameters": {"mood": "happy", "bgm_style": "bright upbeat energetic instrumental", "remix_bgm_only": true}}
+- "Make the score sadder / melancholic" -> {"intent": "adjust_bgm", "target": "video", "scope": "global", "parameters": {"mood": "sad", "bgm_style": "melancholy emotional piano"}}
+- "Remove background music" -> {"intent": "remove_bgm", "target": "video", "scope": "global", "parameters": {"apply_bgm": false}}
 
 Return ONLY the JSON object.
 """
